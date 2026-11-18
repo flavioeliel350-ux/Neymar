@@ -1,0 +1,6 @@
+{
+  "name": "ProntoPreço",
+  "description": "Controle rápido de preços, leitura de código de barras e gestão de estoque offline-first para balcão e gôndola.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

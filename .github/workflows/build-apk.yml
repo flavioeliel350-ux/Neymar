@@ -1,0 +1,55 @@
+name: Compilar APK Android (ProntoPreço)
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  build-android-apk:
+    name: Build ProntoPreço APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Configurar Java 21 (JDK)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Configurar cache do Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Instalar dependências npm
+        run: npm install
+
+      - name: Compilar bundle web (Vite)
+        run: npm run build
+
+      - name: Sincronizar assets com Capacitor Android
+        run: npx cap sync android
+
+      - name: Dar permissão de execução ao Gradle Wrapper
+        run: chmod +x android/gradlew
+
+      - name: Compilar APK Debug
+        working-directory: android
+        run: ./gradlew assembleDebug
+
+      - name: Publicar APK para download (Artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProntoPreco-Android-APK
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30

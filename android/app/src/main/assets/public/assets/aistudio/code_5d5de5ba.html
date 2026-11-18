@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width,initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+    }
+  </style>
+</head>
+<body>
+<!-- STITCH_THREEJS_START:ANIMATION_1 class="fixed inset-0 w-full h-full bg-transparent" -->
+<div class="fixed inset-0 w-full h-full bg-transparent" style="display:block;">
+<script src="https://ajax.googleapis.com/ajax/libs/threejs/r125/three.min.js"></script>
+<div id="threejs-container-ANIMATION_1" style="width:100%;height:100%"></div>
+<script>
+(function() {
+  const container = document.getElementById('threejs-container-ANIMATION_1');
+  const devicePixelRatio = window.devicePixelRatio || 1;
+  # Especificação Técnica e Arquitetura: App de Controle de Preços e Leitura de Código de Barras (Offline-First)
+
+---
+
+## 1. Stack Tecnológica Recomendada
+
+Para um app focado em velocidade operacional, alto desempenho offline e leitura rápida de câmera com código de barras, a stack recomendada é **React Native com Expo (bare/prebuild pronto ou Expo SDK 51+) com TypeScript**:
+
+1. **Framework:** `React Native + Expo (SDK 51+)`
+   - *Por quê:* Rápido setup, suporte multiplataforma (Android/iOS) unificado, excelente ecossistema para prototipação e deploy em pequenos comércios.
+2. **Scanner de Código de Barras:** `expo-camera` (`useCameraPermissions`, `CameraView` com `barcodeScannerSettings`) ou `react-native-vision-camera` + `vision-camera-code-scanner` (ML Kit).
+   - *Por quê:* O componente nativo `CameraView` do Expo moderno possui suporte nativo a hardware acceleration para decodificação instantânea de EAN-13, EAN-8, Code 128, UPC-A a 60fps sem engasgos.
+3. **Banco de Dados Local:** `expo-sqlite` (ou `WatermelonDB` / `op-sqlite`).
+   - *Por quê:* O `expo-sqlite` oferece suporte a SQLite nativo com queries síncronas/assíncronas extremamente rápidas, transações ACID confiáveis e funcionamento 100% offline sem depender de conexão de rede.
+4. **Gerenciamento de Estado & UI:** `Zustand` (leveza extrema) + `Tailwind (NativeWind v4)` ou StyleSheet puro para máximo desempenho de renderização.
+
+---
+
+## 2. Estrutura de Pastas e Arquivos
+
+```text
+barcode-price-app/
+├── assets/
+│   ├── icon.png
+│   └── splash.png
+├── src/
+│   ├── database/
+│   │   ├── database.ts         # Inicialização do SQLite e migrations
+│   │   └── productRepository.ts# CRUD de produtos (getByBarcode, upsert, list)
+│   ├── types/
+│   │   └── product.ts          # Interfaces e tipos TypeScript
+│   ├── hooks/
+│   │   ├── useBarcodeScan.ts   # Debounce e controle de foco da câmera
+│   │   └── useProducts.ts      # Hooks de consulta e mutação
+│   ├── screens/
+│   │   ├── HomeScreen.tsx      # Menu principal com 2 botões grandes
+│   │   ├── ScannerScreen.tsx   # Leitor de código de barras (modo cadastro ou consulta)
+│   │   ├── ProductFormScreen.tsx # Cadastro/Edição de produto
+│   │   └── PriceCheckScreen.tsx  # Exibição do card com preço gigante
+│   ├── components/
+│   │   ├── BarcodeOverlay.tsx  # Retículo visual/mira para leitura
+│   │   └── BigButton.tsx       # Botão de alta acessibilidade e contraste
+│   └── navigation/
+│       └── AppNavigator.tsx    # React Navigation (Native Stack)
+├── App.tsx                     # Entrypoint com inicialização do BD
+├── package.json
+└── tsconfig.json
+```
+
+---
+
+## 3. Código Fonte Principal
+
+### A. Tipos (`src/types/product.ts`)
+```typescript
+export interface Product {
+  id?: number;
+  barcode: string;
+  name: string;
+  price: number; // Salvo em centavos ou float
+  description?: string;
+  photoUri?: string;
+  updatedAt: string;
+}
+```
+
+### B. Inicialização e Repositório SQLite (`src/database/productRepository.ts`)
+```typescript
+import * as SQLite from 'expo-sqlite';
+import { Product } from '../types/product';
+
+let db: SQLite.SQLiteDatabase | null = null;
+
+export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
+  if (!db) {
+    db = await SQLite.openDatabaseAsync('store_products.db');
+    await db.execAsync(`
+      PRAGMA journal_mode = WAL;
+      CREATE TABLE IF NOT EXISTS products (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        barcode TEXT UNIQUE NOT NULL,
+        name TEXT NOT NULL,
+        price REAL NOT NULL,
+        description TEXT,
+        photo_uri TEXT,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_barcode ON products(barcode);
+    `);
+  }
+  return db;
+}
+
+export async function findProductByBarcode(barcode: string): Promise<Product | null> {
+  const database = await getDatabase();
+  const row = await database.getFirstAsync<any>(
+    'SELECT * FROM products WHERE barcode = ?',
+    [barcode]
+  );
+  if (!row) return null;
+  return {
+    id: row.id,
+    barcode: row.barcode,
+    name: row.name,
+    price: row.price,
+    description: row.description,
+    photoUri: row.photo_uri,
+    updatedAt: row.updated_at,
+  };
+}
+
+export async function upsertProduct(product: Omit<Product, 'id' | 'updatedAt'>): Promise<void> {
+  const database = await getDatabase();
+  const now = new Date().toISOString();
+  await database.runAsync(
+    `INSERT INTO products (barcode, name, price, description, photo_uri, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(barcode) DO UPDATE SET
+       name = excluded.name,
+       price = excluded.price,
+       description = excluded.description,
+       photo_uri = excluded.photo_uri,
+       updated_at = excluded.updated_at;`,
+    [product.barcode, product.name, product.price, product.description || '', product.photoUri || '', now]
+  );
+}
+```
+
+### C. Tela Inicial (`src/screens/HomeScreen.tsx`)
+```typescript
+import React from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView, StatusBar } from 'react-native';
+
+export function HomeScreen({ navigation }: any) {
+  return (
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="dark-content" backgroundColor="#F8FAFC" />
+      <View style={styles.header}>
+        <Text style={styles.appTitle}>ProntoPreço</Text>
+        <Text style={styles.subtitle}>Controle Rápido de Balcão e Estoque</Text>
+      </View>
+
+      <View style={styles.actions}>
+        <TouchableOpacity
+          style={[styles.bigButton, styles.queryButton]}
+          activeOpacity={0.85}
+          onPress={() => navigation.navigate('Scanner', { mode: 'query' })}
+        >
+          <Text style={styles.iconText}>🔍</Text>
+          <Text style={styles.buttonTitle}>CONSULTAR PREÇO</Text>
+          <Text style={styles.buttonSubtitle}>Bipar para conferir valor na hora</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.bigButton, styles.registerButton]}
+          activeOpacity={0.85}
+          onPress={() => navigation.navigate('Scanner', { mode: 'register' })}
+        >
+          <Text style={styles.iconText}>🏷️</Text>
+          <Text style={styles.buttonTitle}>CADASTRAR / ATUALIZAR</Text>
+          <Text style={styles.buttonSubtitle}>Bipar para cadastrar ou editar preço</Text>
+        </TouchableOpacity>
+      </View>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#F8FAFC', paddingHorizontal: 20 },
+  header: { marginTop: 40, marginBottom: 30, alignItems: 'center' },
+  appTitle: { fontSize: 32, fontWeight: '800', color: '#0F172A', letterSpacing: -0.5 },
+  subtitle: { fontSize: 15, color: '#64748B', marginTop: 4 },
+  actions: { flex: 1, justifyContent: 'center', gap: 20, marginBottom: 40 },
+  bigButton: {
+    borderRadius: 20,
+    paddingVertical: 32,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 4,
+  },
+  queryButton: { backgroundColor: '#2563EB' },
+  registerButton: { backgroundColor: '#0D9488' },
+  iconText: { fontSize: 44, marginBottom: 12 },
+  buttonTitle: { color: '#FFFFFF', fontSize: 22, fontWeight: '800', textAlign: 'center' },
+  buttonSubtitle: { color: 'rgba(255,255,255,0.85)', fontSize: 14, marginTop: 6, fontWeight: '500' },
+});
+```
+
+### D. Tela do Leitor / Câmera (`src/screens/ScannerScreen.tsx`)
+```typescript
+import React, { useState } from 'react';
+import { StyleSheet, Text, View, TouchableOpacity, Alert } from 'react-native';
+import { CameraView, useCameraPermissions } from 'expo-camera';
+import { findProductByBarcode } from '../database/productRepository';
+
+export function ScannerScreen({ route, navigation }: any) {
+  const { mode } = route.params; // 'query' | 'register'
+  const [permission, requestPermission] = useCameraPermissions();
+  const [scanned, setScanned] = useState(false);
+
+  if (!permission) return <View style={styles.center}><Text>Carregando permissões...</Text></View>;
+  if (!permission.granted) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.alertText}>Precisamos de acesso à câmera para ler os códigos.</Text>
+        <TouchableOpacity style={styles.btnAction} onPress={requestPermission}>
+          <Text style={styles.btnActionText}>Permitir Acesso</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  const handleBarcodeScanned = async ({ data }: { data: string }) => {
+    if (scanned) return;
+    setScanned(true);
+
+    try {
+      const existingProduct = await findProductByBarcode(data);
+
+      if (mode === 'query') {
+        if (existingProduct) {
+          navigation.replace('PriceCheck', { product: existingProduct });
+        } else {
+          Alert.alert(
+            'Não Encontrado',
+            `Código: ${data}\nEste produto não está cadastrado.`,
+            [
+              { text: 'Escanear Outro', onPress: () => setScanned(false) },
+              {
+                text: 'Cadastrar Agora',
+                style: 'default',
+                onPress: () => navigation.replace('ProductForm', { barcode: data }),
+              },
+            ]
+          );
+        }
+      } else {
+        // mode === 'register'
+        navigation.replace('ProductForm', {
+          barcode: data,
+          product: existingProduct || null,
+        });
+      }
+    } catch (e) {
+      Alert.alert('Erro', 'Falha ao buscar produto.');
+      setScanned(false);
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      <CameraView
+        style={StyleSheet.absoluteFillObject}
+        barcodeScannerSettings={{
+          barcodeTypes: ['ean13', 'ean8', 'upc_a', 'code128', 'qr'],
+        }}
+        onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
+      />
+      <View style={styles.overlay}>
+        <View style={styles.scanTargetBox} />
+        <Text style={styles.scanPrompt}>
+          {mode === 'query' ? 'Posicione o código para consultar preço' : 'Posicione o código para cadastrar/editar'}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#000' },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
+  alertText: { fontSize: 16, textAlign: 'center', marginBottom: 16, color: '#334155' },
+  btnAction: { backgroundColor: '#2563EB', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 10 },
+  btnActionText: { color: '#FFF', fontWeight: 'bold' },
+  overlay: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.35)' },
+  scanTargetBox: {
+    width: 280,
+    height: 160,
+    borderWidth: 3,
+    borderColor: '#22C55E',
+    borderRadius: 16,
+    backgroundColor: 'transparent',
+  },
+  scanPrompt: { color: '#FFF', fontSize: 16, fontWeight: '600', marginTop: 24, textAlign: 'center', paddingHorizontal: 20 },
+});
+```
+
+### E. Tela de Exibição do Preço (`src/screens/PriceCheckScreen.tsx`)
+```typescript
+import React from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView } from 'react-native';
+
+export function PriceCheckScreen({ route, navigation }: any) {
+  const { product } = route.params;
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <View style={styles.content}>
+        <Text style={styles.barcodeLabel}>Código: {product.barcode}</Text>
+        <Text style={styles.productName} numberOfLines={2}>{product.name}</Text>
+        
+        <View style={styles.priceContainer}>
+          <Text style={styles.currencyPrefix}>R$</Text>
+          <Text style={styles.priceValue}>{Number(product.price).toFixed(2).replace('.', ',')}</Text>
+        </View>
+
+        {product.description ? (
+          <Text style={styles.description}>{product.description}</Text>
+        ) : null}
+      </View>
+
+      <View style={styles.footerButtons}>
+        <TouchableOpacity
+          style={styles.primaryButton}
+          onPress={() => navigation.replace('Scanner', { mode: 'query' })}
+        >
+          <Text style={styles.primaryButtonText}>Bipar Próximo (Consulta)</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.secondaryButton}
+          onPress={() => navigation.navigate('ProductForm', { barcode: product.barcode, product })}
+        >
+          <Text style={styles.secondaryButtonText}>Alterar Preço / Editar</Text>
+        </TouchableOpacity>
+      </View>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#F8FAFC', justifyContent: 'space-between', padding: 24 },
+  content: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  barcodeLabel: { fontSize: 15, color: '#64748B', fontWeight: '600', letterSpacing: 1, marginBottom: 8 },
+  productName: { fontSize: 28, fontWeight: '800', color: '#0F172A', textAlign: 'center', marginBottom: 24 },
+  priceContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#DCFCE7',
+    paddingVertical: 20,
+    paddingHorizontal: 32,
+    borderRadius: 24,
+    borderWidth: 2,
+    borderColor: '#86EFAC',
+  },
+  currencyPrefix: { fontSize: 32, fontWeight: '700', color: '#15803D', marginTop: 10, marginRight: 8 },
+  priceValue: { fontSize: 64, fontWeight: '900', color: '#15803D' },
+  description: { fontSize: 16, color: '#475569', marginTop: 20, textAlign: 'center' },
+  footerButtons: { gap: 12, marginBottom: 12 },
+  primaryButton: { backgroundColor: '#2563EB', paddingVertical: 18, borderRadius: 16, alignItems: 'center' },
+  primaryButtonText: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
+  secondaryButton: { backgroundColor: '#E2E8F0', paddingVertical: 16, borderRadius: 16, alignItems: 'center' },
+  secondaryButtonText: { color: '#334155', fontSize: 16, fontWeight: '600' },
+});
+```
+
+### F. Tela de Cadastro / Edição (`src/screens/ProductFormScreen.tsx`)
+```typescript
+import React, { useState } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, SafeAreaView, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import { upsertProduct } from '../database/productRepository';
+
+export function ProductFormScreen({ route, navigation }: any) {
+  const { barcode, product } = route.params;
+
+  const [name, setName] = useState(product?.name || '');
+  const [price, setPrice] = useState(product ? String(product.price) : '');
+  const [description, setDescription] = useState(product?.description || '');
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    if (!name.trim()) {
+      Alert.alert('Atenção', 'Informe o nome do produto.');
+      return;
+    }
+    const parsedPrice = parseFloat(price.replace(',', '.'));
+    if (isNaN(parsedPrice) || parsedPrice < 0) {
+      Alert.alert('Atenção', 'Informe um preço válido.');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      await upsertProduct({
+        barcode,
+        name: name.trim(),
+        price: parsedPrice,
+        description: description.trim(),
+      });
+      Alert.alert('Sucesso', 'Produto salvo com sucesso!', [
+        {
+          text: 'Continuar Bipando',
+          onPress: () => navigation.replace('Scanner', { mode: 'register' }),
+        },
+        {
+          text: 'Início',
+          onPress: () => navigation.navigate('Home'),
+        },
+      ]);
+    } catch (err) {
+      Alert.alert('Erro', 'Não foi possível salvar o produto.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+        <ScrollView contentContainerStyle={styles.scroll}>
+          <Text style={styles.headerTitle}>{product ? 'Editar Produto' : 'Novo Produto'}</Text>
+          
+          <View style={styles.fieldGroup}>
+            <Text style={styles.label}>Código de Barras (Travado)</Text>
+            <TextInput style={[styles.input, styles.disabledInput]} value={barcode} editable={false} />
+          </View>
+
+          <View style={styles.fieldGroup}>
+            <Text style={styles.label}>Nome do Produto *</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Ex: Arroz Tio João 5kg"
+              value={name}
+              onChangeText={setName}
+            />
+          </View>
+
+          <View style={styles.fieldGroup}>
+            <Text style={styles.label}>Preço de Venda (R$) *</Text>
+            <TextInput
+              style={[styles.input, styles.priceInput]}
+              placeholder="0,00"
+              keyboardType="decimal-pad"
+              value={price}
+              onChangeText={setPrice}
+            />
+          </View>
+
+          <View style={styles.fieldGroup}>
+            <Text style={styles.label}>Observação / Descrição (Opcional)</Text>
+            <TextInput
+              style={[styles.input, styles.textArea]}
+              placeholder="Ex: Prateleira B3, lote 12..."
+              value={description}
+              onChangeText={setDescription}
+              multiline
+              numberOfLines={3}
+            />
+          </View>
+
+          <TouchableOpacity
+            style={[styles.saveBtn, saving && { opacity: 0.7 }]}
+            onPress={handleSave}
+            disabled={saving}
+          >
+            <Text style={styles.saveBtnText}>{saving ? 'Salvando...' : 'SALVAR PRODUTO'}</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#FFFFFF' },
+  scroll: { padding: 24, gap: 16 },
+  headerTitle: { fontSize: 26, fontWeight: '800', color: '#0F172A', marginBottom: 12 },
+  fieldGroup: { gap: 6 },
+  label: { fontSize: 14, fontWeight: '600', color: '#475569' },
+  input: {
+    borderWidth: 1.5,
+    borderColor: '#CBD5E1',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 16,
+    color: '#0F172A',
+    backgroundColor: '#F8FAFC',
+  },
+  disabledInput: { backgroundColor: '#E2E8F0', color: '#64748B' },
+  priceInput: { fontSize: 22, fontWeight: '700', color: '#15803D' },
+  textArea: { height: 90, textAlignVertical: 'top' },
+  saveBtn: {
+    backgroundColor: '#0D9488',
+    paddingVertical: 18,
+    borderRadius: 14,
+    alignItems: 'center',
+    marginTop: 16,
+  },
+  saveBtnText: { color: '#FFFFFF', fontSize: 18, fontWeight: '800' },
+});
+```
+
+---
+
+## 4. Instruções de Execução Passo a Passo
+
+1. **Instalar Dependências:**
+   ```bash
+   npx create-expo-app barcode-price-app --template blank-typescript
+   cd barcode-price-app
+   npx expo install expo-camera expo-sqlite @react-navigation/native @react-navigation/native-stack react-native-screens react-native-safe-area-context
+   ```
+
+2. **Permissões de Câmera (`app.json`):**
+   Adicione as permissões nos plugins:
+   ```json
+   {
+     "expo": {
+       "plugins": [
+         [
+           "expo-camera",
+           {
+             "cameraPermission": "O app precisa de acesso à câmera para escanear os códigos de barras dos produtos."
+           }
+         ]
+       ]
+     }
+   }
+   ```
+
+3. **Execução no Dispositivo Físico (Recomendado para testar Câmera):**
+   ```bash
+   npx expo start
+   ```
+   - Escaneie o QR Code com o aplicativo **Expo Go** (Android) ou Câmera (iOS).
+   - *Nota:* A leitura de código de barras por hardware é mais precisa quando executada em um smartphone físico real em vez de um emulador.
+
+})();
+</script>
+</div>
+<!-- STITCH_THREEJS_END:ANIMATION_1 -->
+</body>
+</html>
