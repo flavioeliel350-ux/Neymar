@@ -19,7 +19,7 @@ jobs:
       - name: Configurar Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
 
       - name: Configurar Java 21 (JDK)
         uses: actions/setup-java@v4
@@ -27,24 +27,36 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
+      - name: Configurar Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Instalar plataformas Android SDK 36
+        run: |
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
       - name: Configurar cache do Gradle
         uses: gradle/actions/setup-gradle@v4
 
       - name: Instalar dependências npm
-        run: npm install
+        run: npm install --legacy-peer-deps
 
       - name: Compilar bundle web (Vite)
         run: npm run build
 
-      - name: Sincronizar assets com Capacitor Android
-        run: npx cap sync android
+      - name: Sincronizar Capacitor Android
+        run: |
+          if [ ! -d "android" ]; then
+            npx cap add android
+          fi
+          npx cap sync android
 
       - name: Dar permissão de execução ao Gradle Wrapper
         run: chmod +x android/gradlew
 
       - name: Compilar APK Debug
         working-directory: android
-        run: ./gradlew assembleDebug
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Publicar APK para download (Artifact)
         uses: actions/upload-artifact@v4
