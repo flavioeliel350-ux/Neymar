@@ -27,13 +27,14 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Configurar Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Instalar plataformas Android SDK 36
+      - name: Instalar Android SDK 36 e aceitar licenças
         run: |
-          yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+          SDK_BIN="${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDK_BIN" ]; then
+            SDK_BIN="$(command -v sdkmanager)"
+          fi
+          yes | "$SDK_BIN" --licenses > /dev/null 2>&1 || true
+          "$SDK_BIN" "platforms;android-36" "build-tools;36.0.0" "platform-tools"
 
       - name: Configurar cache do Gradle
         uses: gradle/actions/setup-gradle@v4
