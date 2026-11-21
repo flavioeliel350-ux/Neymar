@@ -1,0 +1,73 @@
+name: Compilar Desktop Windows e Linux (ProntoPreço)
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  build-desktop:
+    name: Build ProntoPreço Desktop (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Windows
+            os: windows-latest
+            artifact: ProntoPreco-Desktop-Windows
+            builder-flag: --win
+          - label: Linux
+            os: ubuntu-latest
+            artifact: ProntoPreco-Desktop-Linux
+            builder-flag: --linux
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Instalar dependências do app web
+        run: npm install --legacy-peer-deps
+
+      - name: Compilar bundle web (Vite)
+        run: npm run build
+
+      - name: Copiar bundle compilado para desktop/dist
+        run: node -e "const fs = require('fs'); fs.rmSync('desktop/dist', { recursive: true, force: true }); fs.cpSync('dist', 'desktop/dist', { recursive: true });"
+
+      - name: Instalar dependências do Electron
+        working-directory: desktop
+        run: npm install
+
+      - name: Empacotar instalador e executável Desktop
+        working-directory: desktop
+        run: npx electron-builder ${{ matrix.builder-flag }} --publish never
+
+      - name: Publicar executáveis Windows para download
+        if: matrix.label == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            desktop/release/*.exe
+            desktop/release/*.blockmap
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publicar executáveis Linux para download
+        if: matrix.label == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            desktop/release/*.AppImage
+            desktop/release/*.deb
+          if-no-files-found: error
+          retention-days: 30
