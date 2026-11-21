@@ -1,5 +1,7 @@
 import React from 'react';
-import { AlertTriangle, RotateCw } from 'lucide-react';
+import { signOut } from 'firebase/auth';
+import { AlertTriangle, LogOut, RotateCw } from 'lucide-react';
+import { auth } from '../firebase';
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -26,6 +28,15 @@ export class ErrorBoundary extends React.Component<
     console.error('ProntoPreço ErrorBoundary:', error, info);
   }
 
+  private handleResetSession = async () => {
+    try {
+      await signOut(auth);
+    } catch {
+      // Ignore signOut errors during emergency recovery
+    }
+    window.location.reload();
+  };
+
   override render() {
     if (this.state.hasError) {
       let friendly = 'Não foi possível concluir a operação no momento.';
@@ -33,7 +44,7 @@ export class ErrorBoundary extends React.Component<
         const parsed = JSON.parse(this.state.message);
         if (parsed?.error?.includes('Missing or insufficient permissions')) {
           friendly =
-            'Permissão negada pelo servidor. Verifique se sua conta Google está autenticada e com e-mail verificado.';
+            'Permissão negada pelo servidor. Verifique se sua conta na nuvem está autenticada e com e-mail verificado, ou troque para o Modo Local.';
         } else if (parsed?.error?.includes('Quota exceeded')) {
           friendly =
             'Cota diária gratuita do Firestore atingida. A cota será redefinida amanhã.';
@@ -54,14 +65,24 @@ export class ErrorBoundary extends React.Component<
               </h1>
               <p className="text-sm text-[#434655] mt-1">{friendly}</p>
             </div>
-            <button
-              type="button"
-              onClick={() => window.location.reload()}
-              className="w-full h-11 rounded-xl bg-[#2563eb] hover:bg-[#004ac6] text-white text-sm font-bold flex items-center justify-center gap-2"
-            >
-              <RotateCw className="w-4 h-4" />
-              <span>Recarregar Aplicativo</span>
-            </button>
+            <div className="w-full flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="w-full h-11 rounded-xl bg-[#2563eb] hover:bg-[#004ac6] text-white text-sm font-bold flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <RotateCw className="w-4 h-4" />
+                <span>Recarregar Aplicativo</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => void this.handleResetSession()}
+                className="w-full h-10 rounded-xl bg-[#f2f3ff] hover:bg-[#e2e7ff] text-[#131b2e] text-xs font-bold flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <LogOut className="w-4 h-4" />
+                <span>Sair da Conta / Usar Modo Local</span>
+              </button>
+            </div>
           </div>
         </div>
       );

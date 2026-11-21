@@ -7,13 +7,13 @@ import {
   getDocs,
   limit,
   onSnapshot,
-  orderBy,
   query,
   serverTimestamp,
   setDoc,
   Timestamp,
   Unsubscribe,
   updateDoc,
+  where,
   writeBatch,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
@@ -141,7 +141,9 @@ export async function ensureUserAndStore(user: User): Promise<{
   // Ensure default counter operators (Gerente + Operador Balcão) exist, with zero seed products
   const opsPath = `stores/${store.storeId}/operators`;
   try {
-    const opsSnap = await getDocs(query(collection(db, opsPath), limit(1)));
+    const opsSnap = await getDocs(
+      query(collection(db, opsPath), where('ownerId', '==', user.uid), limit(1)),
+    );
     if (opsSnap.empty) {
       const batch = writeBatch(db);
       const op1Ref = doc(db, opsPath, 'op-01');
@@ -184,11 +186,12 @@ export async function ensureUserAndStore(user: User): Promise<{
 
 export function subscribeStoreProducts(
   storeId: string,
+  ownerId: string,
   onData: (products: Product[]) => void,
   onError: (err: unknown) => void,
 ): Unsubscribe {
   const path = `stores/${storeId}/products`;
-  const q = query(collection(db, path));
+  const q = query(collection(db, path), where('ownerId', '==', ownerId));
   return onSnapshot(
     q,
     (snapshot) => {
@@ -224,11 +227,12 @@ export function subscribeStoreProducts(
 
 export function subscribeStoreScanLogs(
   storeId: string,
+  ownerId: string,
   onData: (logs: ScanLog[]) => void,
   onError: (err: unknown) => void,
 ): Unsubscribe {
   const path = `stores/${storeId}/scans`;
-  const q = query(collection(db, path), orderBy('timestamp', 'desc'), limit(80));
+  const q = query(collection(db, path), where('ownerId', '==', ownerId));
   return onSnapshot(
     q,
     (snapshot) => {
@@ -244,7 +248,10 @@ export function subscribeStoreScanLogs(
           timestamp: timestampToIso(data.timestamp),
         };
       });
-      onData(items);
+      items.sort(
+        (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+      );
+      onData(items.slice(0, 80));
     },
     (error) => {
       onError(error);
@@ -254,11 +261,12 @@ export function subscribeStoreScanLogs(
 
 export function subscribeStoreOperators(
   storeId: string,
+  ownerId: string,
   onData: (operators: StoreOperator[]) => void,
   onError: (err: unknown) => void,
 ): Unsubscribe {
   const path = `stores/${storeId}/operators`;
-  const q = query(collection(db, path));
+  const q = query(collection(db, path), where('ownerId', '==', ownerId));
   return onSnapshot(
     q,
     (snapshot) => {

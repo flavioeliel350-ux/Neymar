@@ -163,7 +163,7 @@ service cloud.firestore {
     }
 
     match /stores/{storeId} {
-      allow get: if isValidId(storeId) && isOwner(storeId) && existing().ownerId == request.auth.uid;
+      allow get: if isValidId(storeId) && isOwner(storeId) && (resource == null || existing().ownerId == request.auth.uid);
       allow list: if isVerified() && existing().ownerId == request.auth.uid && existing().storeId == request.auth.uid;
       allow create: if isValidId(storeId)
         && isOwner(storeId)

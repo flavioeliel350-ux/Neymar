@@ -211,6 +211,7 @@ export default function App() {
 
         unsubProducts = subscribeStoreProducts(
           store.storeId,
+          store.ownerId,
           (items) => {
             if (active) setCloudProducts(items);
           },
@@ -219,6 +220,7 @@ export default function App() {
 
         unsubLogs = subscribeStoreScanLogs(
           store.storeId,
+          store.ownerId,
           (items) => {
             if (active) setCloudLogs(items);
           },
@@ -227,6 +229,7 @@ export default function App() {
 
         unsubOperators = subscribeStoreOperators(
           store.storeId,
+          store.ownerId,
           (items) => {
             if (active) setCloudOperators(items);
           },
