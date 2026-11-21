@@ -1,226 +1,26 @@
-import { Product, ScanLog } from '../types/product';
+import { LocalAccount, Product, ScanLog, StoreOperator } from '../types/product';
 
 const DB_NAME = 'prontopreco_offline_db';
-const DB_VERSION = 1;
-const STORE_PRODUCTS = 'products';
-const STORE_LOGS = 'scan_logs';
-const LS_PRODUCTS_KEY = 'prontopreco_products_v1';
-const LS_LOGS_KEY = 'prontopreco_logs_v1';
+const DB_VERSION = 2;
+const STORE_PRODUCTS = 'products_v2';
+const STORE_LOGS = 'scan_logs_v2';
 
-function minutesAgoIso(minutes: number): string {
-  return new Date(Date.now() - minutes * 60_000).toISOString();
+const LS_ACCOUNTS_KEY = 'prontopreco_local_accounts_v1';
+const LS_ACTIVE_ACCOUNT_KEY = 'prontopreco_active_local_account_v1';
+const LS_PRODUCTS_PREFIX = 'prontopreco_local_products_v2_';
+const LS_LOGS_PREFIX = 'prontopreco_local_logs_v2_';
+
+// Legacy v1 keys cleaned up on upgrade so no demo/seed items leak into new accounts
+const LEGACY_LS_KEYS = ['prontopreco_products_v1', 'prontopreco_logs_v1'];
+
+interface StoredProductRecord extends Product {
+  id: string;
+  accountId: string;
 }
 
-export const SEED_PRODUCTS: Product[] = [
-  {
-    barcode: '7891000100103',
-    name: 'Café Torrado e Moído Tradicional Pilão 500g',
-    brand: 'Pilão',
-    category: 'Mercearia',
-    price: 19.8,
-    wholesalePrice: 18.9,
-    clubPrice: 17.99,
-    marginPercent: 31.4,
-    stock: 24,
-    location: 'Prateleira A-04',
-    weightLabel: '500g',
-    description: 'Embalagem a vácuo tradicional',
-    operator: 'Op. 01',
-    updatedAt: minutesAgoIso(45),
-  },
-  {
-    barcode: '7891000100102',
-    name: 'Café Torrado Tradicional 500g',
-    brand: 'Melitta',
-    category: 'Mercearia',
-    price: 18.9,
-    wholesalePrice: 17.8,
-    clubPrice: 16.99,
-    marginPercent: 28.5,
-    stock: 18,
-    location: 'Prateleira A-04',
-    weightLabel: '500g',
-    operator: 'Op. 01',
-    updatedAt: minutesAgoIso(120),
-  },
-  {
-    barcode: '7892000200204',
-    name: 'Arroz Nobre Tipo 1 - 5kg',
-    brand: 'Tio João',
-    category: 'Mercearia',
-    price: 28.5,
-    wholesalePrice: 26.9,
-    clubPrice: 25.9,
-    marginPercent: 22.0,
-    stock: 42,
-    location: 'Corredor 02 · Base',
-    weightLabel: '5kg',
-    operator: 'Op. 01',
-    updatedAt: minutesAgoIso(180),
-  },
-  {
-    barcode: '7893000300306',
-    name: 'Óleo de Soja Refinado 900ml',
-    brand: 'Soya',
-    category: 'Mercearia',
-    price: 6.8,
-    wholesalePrice: 6.45,
-    clubPrice: 6.19,
-    marginPercent: 19.2,
-    stock: 64,
-    location: 'Corredor 02 · Prat. C',
-    weightLabel: '900ml',
-    operator: 'Op. 02',
-    updatedAt: minutesAgoIso(240),
-  },
-  {
-    barcode: '7891000053508',
-    name: 'Biscoito Maizena Tradicional 400g',
-    brand: 'Marilan',
-    category: 'Mercearia',
-    price: 5.49,
-    wholesalePrice: 4.99,
-    clubPrice: 4.79,
-    marginPercent: 34.0,
-    stock: 37,
-    location: 'Gôndola 03 · Prat. B',
-    weightLabel: '400g',
-    operator: 'Op. 01',
-    updatedAt: minutesAgoIso(90),
-  },
-  {
-    barcode: '7891000315507',
-    name: 'Leite Integral Longa Vida UHT 1L',
-    brand: 'Italac',
-    category: 'Bebidas',
-    price: 4.99,
-    wholesalePrice: 4.69,
-    clubPrice: 4.49,
-    marginPercent: 18.5,
-    stock: 96,
-    location: 'Ilha Lácteos 01',
-    weightLabel: '1L',
-    operator: 'Op. 01',
-    updatedAt: minutesAgoIso(150),
-  },
-  {
-    barcode: '7894900011517',
-    name: 'Refrigerante Cola Original 2L',
-    brand: 'Coca-Cola',
-    category: 'Bebidas',
-    price: 9.49,
-    wholesalePrice: 8.9,
-    clubPrice: 8.49,
-    marginPercent: 27.8,
-    stock: 54,
-    location: 'Bebidas · Prat. A-01',
-    weightLabel: '2L',
-    operator: 'Op. 02',
-    updatedAt: minutesAgoIso(300),
-  },
-  {
-    barcode: '7891150021006',
-    name: 'Detergente Líquido Neutro 500ml',
-    brand: 'Ypê',
-    category: 'Limpeza',
-    price: 2.69,
-    wholesalePrice: 2.39,
-    clubPrice: 2.29,
-    marginPercent: 36.2,
-    stock: 82,
-    location: 'Corredor 05 · Limpeza',
-    weightLabel: '500ml',
-    operator: 'Op. 01',
-    updatedAt: minutesAgoIso(410),
-  },
-  {
-    barcode: '7891021001234',
-    name: 'Sabão em Pó Concentrado 1,6kg',
-    brand: 'Omo',
-    category: 'Limpeza',
-    price: 21.9,
-    wholesalePrice: 19.9,
-    clubPrice: 18.99,
-    marginPercent: 29.0,
-    stock: 19,
-    location: 'Corredor 05 · Base',
-    weightLabel: '1,6kg',
-    operator: 'Op. 01',
-    updatedAt: minutesAgoIso(520),
-  },
-  {
-    barcode: '7891095154005',
-    name: 'Queijo Mussarela Fatiado Bandeja 300g',
-    brand: 'Sadia',
-    category: 'Frios',
-    price: 16.5,
-    wholesalePrice: 15.2,
-    clubPrice: 14.9,
-    marginPercent: 33.5,
-    stock: 14,
-    location: 'Expositor Frios 02',
-    weightLabel: '300g',
-    operator: 'Op. 02',
-    updatedAt: minutesAgoIso(75),
-  },
-  {
-    barcode: '7896004400112',
-    name: 'Pão de Forma Tradicional Pacote 500g',
-    brand: 'Pullman',
-    category: 'Padaria',
-    price: 8.79,
-    wholesalePrice: 8.1,
-    clubPrice: 7.79,
-    marginPercent: 30.0,
-    stock: 22,
-    location: 'Padaria · Gôndola 01',
-    weightLabel: '500g',
-    operator: 'Op. 01',
-    updatedAt: minutesAgoIso(200),
-  },
-  {
-    barcode: '7891910000197',
-    name: 'Açúcar Refinado Especial 1kg',
-    brand: 'União',
-    category: 'Mercearia',
-    price: 4.69,
-    wholesalePrice: 4.35,
-    clubPrice: 4.19,
-    marginPercent: 21.4,
-    stock: 48,
-    location: 'Prateleira A-06',
-    weightLabel: '1kg',
-    operator: 'Op. 01',
-    updatedAt: minutesAgoIso(600),
-  },
-];
-
-export const SEED_LOGS: ScanLog[] = [
-  {
-    id: 'seed-log-1',
-    barcode: '7891000100102',
-    productName: 'Café Torrado Tradicional 500g',
-    price: 18.9,
-    action: 'consulta',
-    timestamp: minutesAgoIso(3),
-  },
-  {
-    id: 'seed-log-2',
-    barcode: '7892000200204',
-    productName: 'Arroz Nobre Tipo 1 - 5kg',
-    price: 28.5,
-    action: 'consulta',
-    timestamp: minutesAgoIso(12),
-  },
-  {
-    id: 'seed-log-3',
-    barcode: '7893000300306',
-    productName: 'Óleo de Soja Refinado 900ml',
-    price: 6.8,
-    action: 'consulta',
-    timestamp: minutesAgoIso(24),
-  },
-];
+interface StoredScanLogRecord extends ScanLog {
+  accountId: string;
+}
 
 let dbPromise: Promise<IDBDatabase | null> | null = null;
 
@@ -234,11 +34,19 @@ function openIDB(): Promise<IDBDatabase | null> {
         const request = indexedDB.open(DB_NAME, DB_VERSION);
         request.onupgradeneeded = () => {
           const db = request.result;
+          if (db.objectStoreNames.contains('products')) {
+            db.deleteObjectStore('products');
+          }
+          if (db.objectStoreNames.contains('scan_logs')) {
+            db.deleteObjectStore('scan_logs');
+          }
           if (!db.objectStoreNames.contains(STORE_PRODUCTS)) {
-            db.createObjectStore(STORE_PRODUCTS, { keyPath: 'barcode' });
+            const pStore = db.createObjectStore(STORE_PRODUCTS, { keyPath: 'id' });
+            pStore.createIndex('by_account', 'accountId', { unique: false });
           }
           if (!db.objectStoreNames.contains(STORE_LOGS)) {
-            db.createObjectStore(STORE_LOGS, { keyPath: 'id' });
+            const lStore = db.createObjectStore(STORE_LOGS, { keyPath: 'id' });
+            lStore.createIndex('by_account', 'accountId', { unique: false });
           }
         };
         request.onsuccess = () => resolve(request.result);
@@ -270,112 +78,236 @@ function writeLocalStorage<T>(key: string, data: T): void {
 }
 
 export async function initDatabase(): Promise<void> {
-  const db = await openIDB();
-  if (!db) {
-    const existing = readLocalStorage<Product[] | null>(LS_PRODUCTS_KEY, null);
-    if (!existing) {
-      writeLocalStorage(LS_PRODUCTS_KEY, SEED_PRODUCTS);
-      writeLocalStorage(LS_LOGS_KEY, SEED_LOGS);
-    }
-    return;
+  try {
+    LEGACY_LS_KEYS.forEach((k) => localStorage.removeItem(k));
+  } catch {
+    // Ignore storage cleanup error
   }
+  await openIDB();
+}
 
-  const count = await new Promise<number>((resolve) => {
-    const tx = db.transaction(STORE_PRODUCTS, 'readonly');
-    const store = tx.objectStore(STORE_PRODUCTS);
-    const req = store.count();
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => resolve(0);
-  });
+// --- Multi-Tenant Local Store Accounts ---
 
-  if (count === 0) {
-    await new Promise<void>((resolve) => {
-      const tx = db.transaction([STORE_PRODUCTS, STORE_LOGS], 'readwrite');
-      const productStore = tx.objectStore(STORE_PRODUCTS);
-      const logStore = tx.objectStore(STORE_LOGS);
-      SEED_PRODUCTS.forEach((p) => productStore.put(p));
-      SEED_LOGS.forEach((l) => logStore.put(l));
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => resolve();
-    });
+export function getLocalAccounts(): LocalAccount[] {
+  return readLocalStorage<LocalAccount[]>(LS_ACCOUNTS_KEY, []);
+}
+
+export function getActiveLocalAccountId(): string | null {
+  try {
+    return localStorage.getItem(LS_ACTIVE_ACCOUNT_KEY);
+  } catch {
+    return null;
   }
 }
 
-export async function getAllProducts(): Promise<Product[]> {
+export function setActiveLocalAccountId(accountId: string | null): void {
+  try {
+    if (accountId) {
+      localStorage.setItem(LS_ACTIVE_ACCOUNT_KEY, accountId);
+    } else {
+      localStorage.removeItem(LS_ACTIVE_ACCOUNT_KEY);
+    }
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+export function createLocalAccount(
+  storeName: string,
+  managerName = 'Gerente',
+  managerPin = '1234',
+): LocalAccount {
+  const id = `local_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+  const cleanStoreName = storeName.trim().slice(0, 100) || 'Minha Loja Local';
+  const cleanManager = managerName.trim().slice(0, 60) || 'Gerente';
+  const cleanPin = /^\d{4}$/.test(managerPin.trim()) ? managerPin.trim() : '1234';
+
+  const account: LocalAccount = {
+    id,
+    storeName: cleanStoreName,
+    createdAt: new Date().toISOString(),
+    operators: [
+      {
+        id: 'op-01',
+        storeId: id,
+        ownerId: id,
+        name: cleanManager,
+        code: 'Op. 01',
+        role: 'admin',
+        pin: cleanPin,
+        active: true,
+      },
+      {
+        id: 'op-02',
+        storeId: id,
+        ownerId: id,
+        name: 'Operador Balcão',
+        code: 'Op. 02',
+        role: 'operator',
+        pin: '0000',
+        active: true,
+      },
+    ],
+  };
+
+  const accounts = getLocalAccounts();
+  accounts.push(account);
+  writeLocalStorage(LS_ACCOUNTS_KEY, accounts);
+  setActiveLocalAccountId(id);
+  return account;
+}
+
+export function updateLocalAccountStoreName(
+  accountId: string,
+  storeName: string,
+): LocalAccount | null {
+  const accounts = getLocalAccounts();
+  const idx = accounts.findIndex((a) => a.id === accountId);
+  if (idx < 0) return null;
+  accounts[idx] = {
+    ...accounts[idx],
+    storeName: storeName.trim().slice(0, 100) || accounts[idx].storeName,
+  };
+  writeLocalStorage(LS_ACCOUNTS_KEY, accounts);
+  return accounts[idx];
+}
+
+export function saveLocalAccountOperator(
+  accountId: string,
+  op: Omit<StoreOperator, 'storeId' | 'ownerId'>,
+): StoreOperator[] {
+  const accounts = getLocalAccounts();
+  const idx = accounts.findIndex((a) => a.id === accountId);
+  if (idx < 0) return [];
+
+  const nextOp: StoreOperator = {
+    ...op,
+    storeId: accountId,
+    ownerId: accountId,
+    pin: /^\d{4}$/.test(op.pin) ? op.pin : '0000',
+  };
+
+  const existingOps = [...accounts[idx].operators];
+  const opIdx = existingOps.findIndex((o) => o.id === nextOp.id);
+  if (opIdx >= 0) {
+    existingOps[opIdx] = nextOp;
+  } else {
+    existingOps.push(nextOp);
+  }
+  existingOps.sort((a, b) => a.code.localeCompare(b.code));
+  accounts[idx] = { ...accounts[idx], operators: existingOps };
+  writeLocalStorage(LS_ACCOUNTS_KEY, accounts);
+  return existingOps;
+}
+
+export function deleteLocalAccountOperator(
+  accountId: string,
+  operatorId: string,
+): StoreOperator[] {
+  const accounts = getLocalAccounts();
+  const idx = accounts.findIndex((a) => a.id === accountId);
+  if (idx < 0) return [];
+
+  const nextOps = accounts[idx].operators.filter((o) => o.id !== operatorId);
+  accounts[idx] = { ...accounts[idx], operators: nextOps };
+  writeLocalStorage(LS_ACCOUNTS_KEY, accounts);
+  return nextOps;
+}
+
+// --- Tenant-Isolated Local Products & Scan Logs ---
+
+function productRecordId(accountId: string, barcode: string): string {
+  return `${accountId}::${barcode.trim()}`;
+}
+
+export async function getAllProducts(accountId: string): Promise<Product[]> {
+  if (!accountId) return [];
   await initDatabase();
   const db = await openIDB();
   if (!db) {
-    return readLocalStorage<Product[]>(LS_PRODUCTS_KEY, SEED_PRODUCTS).sort(
+    return readLocalStorage<Product[]>(`${LS_PRODUCTS_PREFIX}${accountId}`, []).sort(
       (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
     );
   }
 
   return new Promise((resolve) => {
     const tx = db.transaction(STORE_PRODUCTS, 'readonly');
-    const req = tx.objectStore(STORE_PRODUCTS).getAll();
+    const idx = tx.objectStore(STORE_PRODUCTS).index('by_account');
+    const req = idx.getAll(IDBKeyRange.only(accountId));
     req.onsuccess = () => {
-      const items = (req.result as Product[]) || [];
+      const items = ((req.result as StoredProductRecord[]) || []).map(
+        ({ id: _id, accountId: _acc, ...product }) => product,
+      );
       items.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
       resolve(items);
     };
-    req.onerror = () => resolve(SEED_PRODUCTS);
+    req.onerror = () => resolve([]);
   });
 }
 
-export async function findProductByBarcode(barcode: string): Promise<Product | null> {
+export async function findProductByBarcode(
+  accountId: string,
+  barcode: string,
+): Promise<Product | null> {
   const normalized = barcode.trim();
-  if (!normalized) return null;
+  if (!accountId || !normalized) return null;
   await initDatabase();
   const db = await openIDB();
   if (!db) {
-    const items = readLocalStorage<Product[]>(LS_PRODUCTS_KEY, SEED_PRODUCTS);
+    const items = readLocalStorage<Product[]>(`${LS_PRODUCTS_PREFIX}${accountId}`, []);
     return items.find((p) => p.barcode === normalized) || null;
   }
 
   return new Promise((resolve) => {
     const tx = db.transaction(STORE_PRODUCTS, 'readonly');
-    const req = tx.objectStore(STORE_PRODUCTS).get(normalized);
-    req.onsuccess = () => resolve((req.result as Product | undefined) || null);
+    const req = tx.objectStore(STORE_PRODUCTS).get(productRecordId(accountId, normalized));
+    req.onsuccess = () => {
+      const res = req.result as StoredProductRecord | undefined;
+      if (!res) {
+        resolve(null);
+        return;
+      }
+      const { id: _id, accountId: _acc, ...product } = res;
+      resolve(product);
+    };
     req.onerror = () => resolve(null);
   });
 }
 
-export async function searchProducts(query: string): Promise<Product[]> {
-  const q = query.trim().toLowerCase();
-  const all = await getAllProducts();
-  if (!q) return all;
-  return all.filter(
-    (p) =>
-      p.barcode.toLowerCase().includes(q) ||
-      p.name.toLowerCase().includes(q) ||
-      p.brand.toLowerCase().includes(q) ||
-      p.category.toLowerCase().includes(q),
-  );
-}
-
-export async function upsertProduct(product: Omit<Product, 'updatedAt'>): Promise<Product> {
+export async function upsertProduct(
+  accountId: string,
+  product: Omit<Product, 'updatedAt'>,
+): Promise<Product> {
   await initDatabase();
   const fullProduct: Product = {
     ...product,
+    barcode: product.barcode.trim(),
     updatedAt: new Date().toISOString(),
   };
 
   const db = await openIDB();
   if (!db) {
-    const items = readLocalStorage<Product[]>(LS_PRODUCTS_KEY, SEED_PRODUCTS);
+    const key = `${LS_PRODUCTS_PREFIX}${accountId}`;
+    const items = readLocalStorage<Product[]>(key, []);
     const idx = items.findIndex((p) => p.barcode === fullProduct.barcode);
     if (idx >= 0) {
       items[idx] = fullProduct;
     } else {
       items.unshift(fullProduct);
     }
-    writeLocalStorage(LS_PRODUCTS_KEY, items);
+    writeLocalStorage(key, items);
     return fullProduct;
   }
 
+  const record: StoredProductRecord = {
+    ...fullProduct,
+    id: productRecordId(accountId, fullProduct.barcode),
+    accountId,
+  };
+
   await new Promise<void>((resolve) => {
     const tx = db.transaction(STORE_PRODUCTS, 'readwrite');
-    tx.objectStore(STORE_PRODUCTS).put(fullProduct);
+    tx.objectStore(STORE_PRODUCTS).put(record);
     tx.oncomplete = () => resolve();
     tx.onerror = () => resolve();
   });
@@ -383,13 +315,15 @@ export async function upsertProduct(product: Omit<Product, 'updatedAt'>): Promis
   return fullProduct;
 }
 
-export async function deleteProduct(barcode: string): Promise<void> {
+export async function deleteProduct(accountId: string, barcode: string): Promise<void> {
+  if (!accountId) return;
   await initDatabase();
   const db = await openIDB();
   if (!db) {
-    const items = readLocalStorage<Product[]>(LS_PRODUCTS_KEY, SEED_PRODUCTS);
+    const key = `${LS_PRODUCTS_PREFIX}${accountId}`;
+    const items = readLocalStorage<Product[]>(key, []);
     writeLocalStorage(
-      LS_PRODUCTS_KEY,
+      key,
       items.filter((p) => p.barcode !== barcode),
     );
     return;
@@ -397,44 +331,55 @@ export async function deleteProduct(barcode: string): Promise<void> {
 
   await new Promise<void>((resolve) => {
     const tx = db.transaction(STORE_PRODUCTS, 'readwrite');
-    tx.objectStore(STORE_PRODUCTS).delete(barcode);
+    tx.objectStore(STORE_PRODUCTS).delete(productRecordId(accountId, barcode));
     tx.oncomplete = () => resolve();
     tx.onerror = () => resolve();
   });
 }
 
-export async function adjustProductStock(barcode: string, delta: number): Promise<Product | null> {
-  const existing = await findProductByBarcode(barcode);
+export async function adjustProductStock(
+  accountId: string,
+  barcode: string,
+  delta: number,
+  operatorCode?: string,
+): Promise<Product | null> {
+  const existing = await findProductByBarcode(accountId, barcode);
   if (!existing) return null;
   const nextStock = Math.max(0, existing.stock + delta);
-  return upsertProduct({
+  return upsertProduct(accountId, {
     ...existing,
     stock: nextStock,
+    operator: operatorCode || existing.operator,
   });
 }
 
-export async function getScanLogs(limit = 50): Promise<ScanLog[]> {
+export async function getScanLogs(accountId: string, limit = 50): Promise<ScanLog[]> {
+  if (!accountId) return [];
   await initDatabase();
   const db = await openIDB();
   if (!db) {
-    return readLocalStorage<ScanLog[]>(LS_LOGS_KEY, SEED_LOGS)
+    return readLocalStorage<ScanLog[]>(`${LS_LOGS_PREFIX}${accountId}`, [])
       .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
       .slice(0, limit);
   }
 
   return new Promise((resolve) => {
     const tx = db.transaction(STORE_LOGS, 'readonly');
-    const req = tx.objectStore(STORE_LOGS).getAll();
+    const idx = tx.objectStore(STORE_LOGS).index('by_account');
+    const req = idx.getAll(IDBKeyRange.only(accountId));
     req.onsuccess = () => {
-      const logs = (req.result as ScanLog[]) || [];
+      const logs = ((req.result as StoredScanLogRecord[]) || []).map(
+        ({ accountId: _acc, ...log }) => log,
+      );
       logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
       resolve(logs.slice(0, limit));
     };
-    req.onerror = () => resolve(SEED_LOGS);
+    req.onerror = () => resolve([]);
   });
 }
 
 export async function addScanLog(
+  accountId: string,
   entry: Omit<ScanLog, 'id' | 'timestamp'>,
 ): Promise<ScanLog> {
   await initDatabase();
@@ -446,15 +391,21 @@ export async function addScanLog(
 
   const db = await openIDB();
   if (!db) {
-    const logs = readLocalStorage<ScanLog[]>(LS_LOGS_KEY, SEED_LOGS);
+    const key = `${LS_LOGS_PREFIX}${accountId}`;
+    const logs = readLocalStorage<ScanLog[]>(key, []);
     logs.unshift(log);
-    writeLocalStorage(LS_LOGS_KEY, logs.slice(0, 200));
+    writeLocalStorage(key, logs.slice(0, 200));
     return log;
   }
 
+  const record: StoredScanLogRecord = {
+    ...log,
+    accountId,
+  };
+
   await new Promise<void>((resolve) => {
     const tx = db.transaction(STORE_LOGS, 'readwrite');
-    tx.objectStore(STORE_LOGS).put(log);
+    tx.objectStore(STORE_LOGS).put(record);
     tx.oncomplete = () => resolve();
     tx.onerror = () => resolve();
   });
@@ -462,8 +413,8 @@ export async function addScanLog(
   return log;
 }
 
-export async function getTodayScanCount(): Promise<number> {
-  const logs = await getScanLogs(250);
+export async function getTodayScanCount(accountId: string): Promise<number> {
+  const logs = await getScanLogs(accountId, 250);
   const now = new Date();
   return logs.filter((l) => {
     const d = new Date(l.timestamp);
@@ -473,25 +424,4 @@ export async function getTodayScanCount(): Promise<number> {
       d.getFullYear() === now.getFullYear()
     );
   }).length;
-}
-
-export async function resetCatalogToSeed(): Promise<void> {
-  const db = await openIDB();
-  if (!db) {
-    writeLocalStorage(LS_PRODUCTS_KEY, SEED_PRODUCTS);
-    writeLocalStorage(LS_LOGS_KEY, SEED_LOGS);
-    return;
-  }
-
-  await new Promise<void>((resolve) => {
-    const tx = db.transaction([STORE_PRODUCTS, STORE_LOGS], 'readwrite');
-    const pStore = tx.objectStore(STORE_PRODUCTS);
-    const lStore = tx.objectStore(STORE_LOGS);
-    pStore.clear();
-    lStore.clear();
-    SEED_PRODUCTS.forEach((p) => pStore.put(p));
-    SEED_LOGS.forEach((l) => lStore.put(l));
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => resolve();
-  });
 }

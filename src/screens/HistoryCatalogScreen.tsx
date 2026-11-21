@@ -5,7 +5,6 @@ import {
   Lock,
   Package,
   Plus,
-  RotateCcw,
   Search,
 } from 'lucide-react';
 import { CATEGORIES, Category, Product, ScanLog } from '../types/product';
@@ -15,11 +14,10 @@ import { ProductVisual } from '../components/ProductVisual';
 interface HistoryCatalogScreenProps {
   products: Product[];
   logs: ScanLog[];
-  syncMode: 'cloud' | 'offline';
+  syncMode: 'cloud' | 'local';
   canEditPrices: boolean;
   onOpenProduct: (product: Product) => void;
   onNewProduct: () => void;
-  onResetSeed: () => Promise<void>;
   onOpenAccount: () => void;
 }
 
@@ -30,13 +28,11 @@ export function HistoryCatalogScreen({
   canEditPrices,
   onOpenProduct,
   onNewProduct,
-  onResetSeed,
   onOpenAccount,
 }: HistoryCatalogScreenProps) {
   const [tab, setTab] = useState<'catalog' | 'logs'>('catalog');
   const [query, setQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<'Todos' | Category>('Todos');
-  const [confirmReset, setConfirmReset] = useState(false);
 
   const filteredProducts = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -116,14 +112,16 @@ export function HistoryCatalogScreen({
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            <button
-              type="button"
-              onClick={handleExportCsv}
-              className="h-10 px-3.5 rounded-xl bg-white border border-[#cbd5e1] hover:bg-[#f2f3ff] text-xs font-bold text-[#131b2e] flex items-center gap-1.5 whitespace-nowrap"
-            >
-              <Download className="w-4 h-4 text-[#434655]" />
-              <span>Exportar CSV</span>
-            </button>
+            {products.length > 0 && (
+              <button
+                type="button"
+                onClick={handleExportCsv}
+                className="h-10 px-3.5 rounded-xl bg-white border border-[#cbd5e1] hover:bg-[#f2f3ff] text-xs font-bold text-[#131b2e] flex items-center gap-1.5 whitespace-nowrap"
+              >
+                <Download className="w-4 h-4 text-[#434655]" />
+                <span>Exportar CSV</span>
+              </button>
+            )}
 
             <button
               type="button"
@@ -180,8 +178,21 @@ export function HistoryCatalogScreen({
         {tab === 'catalog' ? (
           <div className="bg-white rounded-2xl border border-[#e2e7ff] overflow-hidden">
             {filteredProducts.length === 0 ? (
-              <div className="p-8 text-center text-sm text-[#434655]">
-                Nenhum produto encontrado no catálogo local.
+              <div className="p-8 text-center flex flex-col items-center gap-2">
+                <p className="text-sm font-semibold text-[#434655]">
+                  {products.length === 0
+                    ? 'Nenhum produto cadastrado ainda nesta loja.'
+                    : 'Nenhum produto corresponde ao filtro atual.'}
+                </p>
+                {products.length === 0 && canEditPrices && (
+                  <button
+                    type="button"
+                    onClick={onNewProduct}
+                    className="mt-1 px-4 py-2 rounded-xl bg-[#007b71] hover:bg-[#006058] text-white text-xs font-bold"
+                  >
+                    Cadastrar Primeiro Produto
+                  </button>
+                )}
               </div>
             ) : (
               <div className="divide-y divide-[#f2f3ff]">
@@ -225,7 +236,7 @@ export function HistoryCatalogScreen({
           <div className="bg-white rounded-2xl border border-[#e2e7ff] overflow-hidden">
             {filteredLogs.length === 0 ? (
               <div className="p-8 text-center text-sm text-[#434655]">
-                Nenhum registro de bip encontrado.
+                Nenhum registro de bip encontrado nesta loja.
               </div>
             ) : (
               <div className="divide-y divide-[#f2f3ff]">
@@ -273,42 +284,6 @@ export function HistoryCatalogScreen({
                     </button>
                   );
                 })}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Footer Utility: Reset Seed Data (Offline local catalog only) */}
-        {syncMode === 'offline' && (
-          <div className="flex justify-end pt-1">
-            {!confirmReset ? (
-              <button
-                type="button"
-                onClick={() => setConfirmReset(true)}
-                className="text-xs font-semibold text-[#434655] hover:text-[#131b2e] flex items-center gap-1.5 py-2 px-3 rounded-lg"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>Restaurar catálogo inicial</span>
-              </button>
-            ) : (
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setConfirmReset(false)}
-                  className="text-xs font-semibold text-[#434655] px-3 py-1.5 rounded-lg bg-[#eaedff]"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    await onResetSeed();
-                    setConfirmReset(false);
-                  }}
-                  className="text-xs font-bold text-white px-3 py-1.5 rounded-lg bg-[#ba1a1a]"
-                >
-                  Confirmar Restauração
-                </button>
               </div>
             )}
           </div>

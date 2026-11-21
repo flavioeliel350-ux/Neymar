@@ -1,11 +1,11 @@
 import React from 'react';
-import { ArrowLeft, Cloud, ScanBarcode, UserCircle2 } from 'lucide-react';
+import { ArrowLeft, Cloud, HardDrive, ScanBarcode, UserCircle2 } from 'lucide-react';
 import { AppView, ScannerMode, StoreOperator } from '../types/product';
 
 interface TopBarProps {
   view: AppView;
   title?: string;
-  syncMode: 'cloud' | 'offline';
+  syncMode: 'cloud' | 'local' | 'none';
   activeOperator?: StoreOperator | null;
   onNavigate: (view: AppView, mode?: ScannerMode) => void;
   onBack?: () => void;
@@ -22,11 +22,12 @@ export function TopBar({
   onOpenAccount,
 }: TopBarProps) {
   const isStackView = view === 'details' || view === 'form';
+  const hasStore = syncMode !== 'none';
   const operatorLabel = activeOperator
     ? `${activeOperator.code} · ${activeOperator.role === 'admin' ? 'Gerente' : 'Operador'}`
-    : 'Entrar / Nuvem';
+    : 'Entrar na Loja';
 
-  if (isStackView) {
+  if (isStackView && hasStore) {
     return (
       <header className="sticky top-0 z-40 w-full pt-safe bg-[#faf8ff]/90 backdrop-blur-xl border-b border-[#e2e7ff]">
         <div className="max-w-6xl mx-auto h-14 px-3 md:px-6 flex items-center justify-between gap-3">
@@ -46,7 +47,7 @@ export function TopBar({
               <span className="text-[11px] font-medium text-[#434655] truncate">
                 {syncMode === 'cloud'
                   ? `Nuvem Sincronizada · ${activeOperator?.code || 'Op. 01'}`
-                  : 'Banco Local · Armazenamento Offline'}
+                  : `Conta Local Offline · ${activeOperator?.code || 'Op. 01'}`}
               </span>
             </div>
           </div>
@@ -60,9 +61,9 @@ export function TopBar({
               {syncMode === 'cloud' ? (
                 <Cloud className="w-4 h-4 text-[#006e2d]" />
               ) : (
-                <UserCircle2 className="w-4 h-4 text-[#004ac6]" />
+                <HardDrive className="w-4 h-4 text-[#006058]" />
               )}
-              <span>{syncMode === 'cloud' ? activeOperator?.code || 'Op. 01' : 'Entrar'}</span>
+              <span>{activeOperator?.code || 'Op. 01'}</span>
             </button>
 
             <button
@@ -95,48 +96,50 @@ export function TopBar({
           </span>
         </button>
 
-        <nav className="hidden md:flex items-center gap-6 text-sm font-semibold text-[#434655]">
-          <button
-            type="button"
-            onClick={() => onNavigate('home')}
-            className={`py-1 whitespace-nowrap shrink-0 transition-colors border-b-2 ${
-              view === 'home'
-                ? 'text-[#004ac6] border-[#2563eb]'
-                : 'border-transparent hover:text-[#131b2e]'
-            }`}
-          >
-            Início
-          </button>
-          <button
-            type="button"
-            onClick={() => onNavigate('scanner', 'query')}
-            className={`py-1 whitespace-nowrap shrink-0 transition-colors border-b-2 ${
-              view === 'scanner'
-                ? 'text-[#004ac6] border-[#2563eb]'
-                : 'border-transparent hover:text-[#131b2e]'
-            }`}
-          >
-            Bipar Código
-          </button>
-          <button
-            type="button"
-            onClick={() => onNavigate('history')}
-            className={`py-1 whitespace-nowrap shrink-0 transition-colors border-b-2 ${
-              view === 'history'
-                ? 'text-[#004ac6] border-[#2563eb]'
-                : 'border-transparent hover:text-[#131b2e]'
-            }`}
-          >
-            Histórico &amp; Catálogo
-          </button>
-          <button
-            type="button"
-            onClick={() => onNavigate('form')}
-            className="py-1 whitespace-nowrap shrink-0 transition-colors border-b-2 border-transparent hover:text-[#131b2e]"
-          >
-            Novo Cadastro
-          </button>
-        </nav>
+        {hasStore && (
+          <nav className="hidden md:flex items-center gap-6 text-sm font-semibold text-[#434655]">
+            <button
+              type="button"
+              onClick={() => onNavigate('home')}
+              className={`py-1 whitespace-nowrap shrink-0 transition-colors border-b-2 ${
+                view === 'home'
+                  ? 'text-[#004ac6] border-[#2563eb]'
+                  : 'border-transparent hover:text-[#131b2e]'
+              }`}
+            >
+              Início
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigate('scanner', 'query')}
+              className={`py-1 whitespace-nowrap shrink-0 transition-colors border-b-2 ${
+                view === 'scanner'
+                  ? 'text-[#004ac6] border-[#2563eb]'
+                  : 'border-transparent hover:text-[#131b2e]'
+              }`}
+            >
+              Bipar Código
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigate('history')}
+              className={`py-1 whitespace-nowrap shrink-0 transition-colors border-b-2 ${
+                view === 'history'
+                  ? 'text-[#004ac6] border-[#2563eb]'
+                  : 'border-transparent hover:text-[#131b2e]'
+              }`}
+            >
+              Histórico &amp; Catálogo
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigate('form')}
+              className="py-1 whitespace-nowrap shrink-0 transition-colors border-b-2 border-transparent hover:text-[#131b2e]"
+            >
+              Novo Cadastro
+            </button>
+          </nav>
+        )}
 
         <div className="flex items-center gap-2 shrink-0">
           <button
@@ -145,25 +148,31 @@ export function TopBar({
             className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold whitespace-nowrap shrink-0 transition-all min-h-[40px] ${
               syncMode === 'cloud'
                 ? 'bg-[#dcfce7] text-[#005320] hover:bg-[#bbf7d0]'
-                : 'bg-[#eaedff] text-[#004ac6] hover:bg-[#dae2fd]'
+                : syncMode === 'local'
+                  ? 'bg-[#e6fffa] text-[#006058] hover:bg-[#ccfbf1]'
+                  : 'bg-[#eaedff] text-[#004ac6] hover:bg-[#dae2fd]'
             }`}
           >
             {syncMode === 'cloud' ? (
               <Cloud className="w-4 h-4 shrink-0" />
+            ) : syncMode === 'local' ? (
+              <HardDrive className="w-4 h-4 shrink-0" />
             ) : (
               <UserCircle2 className="w-4 h-4 shrink-0" />
             )}
             <span>{operatorLabel}</span>
           </button>
 
-          <button
-            type="button"
-            onClick={() => onNavigate('scanner', 'query')}
-            className="hidden sm:inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2563eb] text-white text-xs font-bold whitespace-nowrap shrink-0 hover:bg-[#004ac6] active:brightness-90 transition-all min-h-[40px]"
-          >
-            <ScanBarcode className="w-4 h-4" />
-            <span>Bipar Produto</span>
-          </button>
+          {hasStore && (
+            <button
+              type="button"
+              onClick={() => onNavigate('scanner', 'query')}
+              className="hidden sm:inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2563eb] text-white text-xs font-bold whitespace-nowrap shrink-0 hover:bg-[#004ac6] active:brightness-90 transition-all min-h-[40px]"
+            >
+              <ScanBarcode className="w-4 h-4" />
+              <span>Bipar Produto</span>
+            </button>
+          )}
         </div>
       </div>
     </header>

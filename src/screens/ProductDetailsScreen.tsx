@@ -24,7 +24,7 @@ import { ProductVisual } from '../components/ProductVisual';
 
 interface ProductDetailsScreenProps {
   product: Product;
-  syncMode: 'cloud' | 'offline';
+  syncMode: 'cloud' | 'local';
   canEditPrices: boolean;
   onScanNext: () => void;
   onEdit: (product: Product) => void;
@@ -58,7 +58,7 @@ export function ProductDetailsScreen({
             <span>
               {syncMode === 'cloud'
                 ? 'Produto Sincronizado na Nuvem'
-                : 'Produto no Banco Local'}
+                : 'Produto na Conta Local'}
             </span>
           </div>
           <div className="inline-flex items-center gap-1.5 text-xs font-mono font-bold text-[#434655] bg-[#eaedff] px-2.5 py-1 rounded-lg">

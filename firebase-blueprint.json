@@ -108,9 +108,9 @@
       "schema": { "$ref": "#/entities/Product" },
       "description": "Store retail product catalog indexed by barcode."
     },
-    "/stores/{storeId}/scanLogs/{logId}": {
+    "/stores/{storeId}/scans/{logId}": {
       "schema": { "$ref": "#/entities/ScanLog" },
-      "description": "Immutable barcode scan and price change logs."
+      "description": "Immutable barcode scan and price change logs isolated per store."
     }
   }
 }

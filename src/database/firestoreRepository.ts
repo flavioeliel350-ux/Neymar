@@ -26,9 +26,6 @@ import {
   StoreOperator,
   UserProfile,
 } from '../types/product';
-import { SEED_PRODUCTS } from './productRepository';
-
-const BOOTSTRAPPED_ADMIN_EMAIL = 'flavioeliel350@gmail.com';
 
 function sanitizeId(raw: string): string {
   const cleaned = raw.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -79,10 +76,6 @@ export async function ensureUserAndStore(user: User): Promise<{
         storeId: d.storeId,
       };
     } else {
-      const initialRole =
-        user.email === BOOTSTRAPPED_ADMIN_EMAIL && user.emailVerified
-          ? 'admin'
-          : 'operator';
       const displayName = clampStr(user.displayName || user.email?.split('@')[0], 80, 'Operador');
       const email = clampStr(user.email || 'usuario@loja.local', 120, 'usuario@loja.local');
       const storeId = user.uid;
@@ -91,7 +84,7 @@ export async function ensureUserAndStore(user: User): Promise<{
         uid: user.uid,
         displayName,
         email,
-        role: initialRole,
+        role: 'operator',
         storeId,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -101,7 +94,7 @@ export async function ensureUserAndStore(user: User): Promise<{
         uid: user.uid,
         displayName,
         email,
-        role: initialRole,
+        role: 'operator',
         storeId,
       };
     }
@@ -123,17 +116,21 @@ export async function ensureUserAndStore(user: User): Promise<{
         ownerId: sd.ownerId,
       };
     } else {
-      const storeName = 'Loja Principal ProntoPreço';
+      const defaultStoreName = clampStr(
+        user.displayName ? `Loja ${user.displayName}` : 'Minha Loja ProntoPreço',
+        100,
+        'Minha Loja ProntoPreço',
+      );
       await setDoc(storeRef, {
         storeId: profile.storeId,
-        name: storeName,
+        name: defaultStoreName,
         ownerId: user.uid,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
       store = {
         storeId: profile.storeId,
-        name: storeName,
+        name: defaultStoreName,
         ownerId: user.uid,
       };
     }
@@ -141,7 +138,7 @@ export async function ensureUserAndStore(user: User): Promise<{
     handleFirestoreError(err, OperationType.WRITE, storePath);
   }
 
-  // Ensure default counter operators exist
+  // Ensure default counter operators (Gerente + Operador Balcão) exist, with zero seed products
   const opsPath = `stores/${store.storeId}/operators`;
   try {
     const opsSnap = await getDocs(query(collection(db, opsPath), limit(1)));
@@ -180,42 +177,6 @@ export async function ensureUserAndStore(user: User): Promise<{
     }
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, opsPath);
-  }
-
-  // Seed initial retail catalog in cloud store on first setup if empty
-  const prodsPath = `stores/${store.storeId}/products`;
-  try {
-    const prodsSnap = await getDocs(query(collection(db, prodsPath), limit(1)));
-    if (prodsSnap.empty) {
-      const batch = writeBatch(db);
-      for (const item of SEED_PRODUCTS) {
-        const barcode = sanitizeId(item.barcode);
-        const ref = doc(db, prodsPath, barcode);
-        batch.set(ref, {
-          barcode,
-          storeId: store.storeId,
-          ownerId: user.uid,
-          name: clampStr(item.name, 120, 'Produto'),
-          brand: clampStr(item.brand, 60, 'Marca'),
-          category: clampCategory(item.category),
-          price: clampNum(item.price, 0.01, 1000000, 1),
-          wholesalePrice: clampNum(item.wholesalePrice, 0, 1000000, item.price * 0.94),
-          clubPrice: clampNum(item.clubPrice, 0, 1000000, item.price * 0.9),
-          marginPercent: clampNum(item.marginPercent, 0, 100, 28),
-          stock: clampNum(item.stock, 0, 1000000, 0),
-          location: clampStr(item.location, 80, 'Balcão'),
-          weightLabel: clampStr(item.weightLabel, 24, 'un'),
-          description: clampStr(item.description, 240, ''),
-          operator: clampStr(item.operator, 32, 'Op. 01'),
-          updatedBy: user.uid,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
-      }
-      await batch.commit();
-    }
-  } catch (err) {
-    handleFirestoreError(err, OperationType.WRITE, prodsPath);
   }
 
   return { profile, store };
@@ -266,7 +227,7 @@ export function subscribeStoreScanLogs(
   onData: (logs: ScanLog[]) => void,
   onError: (err: unknown) => void,
 ): Unsubscribe {
-  const path = `stores/${storeId}/scanLogs`;
+  const path = `stores/${storeId}/scans`;
   const q = query(collection(db, path), orderBy('timestamp', 'desc'), limit(80));
   return onSnapshot(
     q,
@@ -427,9 +388,9 @@ export async function addScanLogToFirestore(
   entry: Omit<ScanLog, 'id' | 'timestamp'>,
 ): Promise<void> {
   const logId = sanitizeId(`log_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`);
-  const path = `stores/${storeId}/scanLogs/${logId}`;
+  const path = `stores/${storeId}/scans/${logId}`;
   try {
-    await setDoc(doc(db, 'stores', storeId, 'scanLogs', logId), {
+    await setDoc(doc(db, 'stores', storeId, 'scans', logId), {
       id: logId,
       storeId,
       ownerId,
@@ -503,7 +464,7 @@ export async function updateStoreNameInFirestore(
   const path = `stores/${storeId}`;
   try {
     await updateDoc(doc(db, 'stores', storeId), {
-      name: clampStr(name, 100, 'Loja ProntoPreço'),
+      name: clampStr(name, 100, 'Minha Loja ProntoPreço'),
       updatedAt: serverTimestamp(),
     });
   } catch (err) {

@@ -63,6 +63,22 @@ export interface StoreOperator {
   active: boolean;
 }
 
+export interface LocalAccount {
+  id: string;
+  storeName: string;
+  createdAt: string;
+  operators: StoreOperator[];
+}
+
+export interface BarcodeLookupResult {
+  barcode: string;
+  name: string;
+  brand?: string;
+  weightLabel?: string;
+  category?: Category;
+  source: 'Open Food Facts' | 'Open Products Facts';
+}
+
 export type ScannerMode = 'query' | 'register';
 
 export type AppView = 'home' | 'scanner' | 'details' | 'form' | 'history';

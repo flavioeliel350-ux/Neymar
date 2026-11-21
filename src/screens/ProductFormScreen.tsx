@@ -1,22 +1,26 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   CheckCircle2,
   CloudUpload,
   KeyRound,
+  Loader2,
   Lock,
   ScanBarcode,
+  Search,
+  Sparkles,
   Store,
   Trash2,
   X,
 } from 'lucide-react';
 import { CATEGORIES, Category, Product } from '../types/product';
 import { playBeep, triggerHaptic } from '../utils/feedback';
+import { lookupProductByBarcode } from '../services/barcodeLookupService';
 
 interface ProductFormScreenProps {
   initialBarcode?: string;
   existingProduct?: Product | null;
   lockBarcode?: boolean;
-  syncMode: 'cloud' | 'offline';
+  syncMode: 'cloud' | 'local';
   canEditPrices: boolean;
   operatorCode: string;
   onSave: (product: Omit<Product, 'updatedAt'>) => Promise<Product>;
@@ -80,10 +84,71 @@ export function ProductFormScreen({
     existingProduct?.description || '',
   );
 
+  const [lookupStatus, setLookupStatus] = useState<
+    'idle' | 'loading' | 'found' | 'not_found'
+  >('idle');
+  const [lookupSource, setLookupSource] = useState<string | null>(null);
+
+  const nameDirtyRef = useRef(Boolean(existingProduct?.name));
+  const brandDirtyRef = useRef(Boolean(existingProduct?.brand));
+  const weightDirtyRef = useRef(Boolean(existingProduct?.weightLabel));
+  const categoryDirtyRef = useRef(Boolean(existingProduct?.category));
+  const lastLookedUpRef = useRef<string>('');
+
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [savedProduct, setSavedProduct] = useState<Product | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const runBarcodeLookup = useCallback(async (rawCode: string, force = false) => {
+    const clean = rawCode.trim().replace(/\s+/g, '');
+    if (!/^\d{8,14}$/.test(clean)) return;
+    if (!force && lastLookedUpRef.current === clean) return;
+
+    lastLookedUpRef.current = clean;
+    setLookupStatus('loading');
+    setLookupSource(null);
+
+    const found = await lookupProductByBarcode(clean);
+    if (lastLookedUpRef.current !== clean) return;
+
+    if (!found) {
+      setLookupStatus('not_found');
+      return;
+    }
+
+    if (!nameDirtyRef.current && found.name) {
+      setName(found.name);
+    }
+    if (!brandDirtyRef.current && found.brand) {
+      setBrand(found.brand);
+    }
+    if (!weightDirtyRef.current && found.weightLabel) {
+      setWeightLabel(found.weightLabel);
+    }
+    if (!categoryDirtyRef.current && found.category) {
+      setCategory(found.category);
+    }
+
+    setLookupSource(found.source);
+    setLookupStatus('found');
+  }, []);
+
+  useEffect(() => {
+    if (isEditing || !canEditPrices) return;
+    const clean = barcode.trim().replace(/\s+/g, '');
+    if (!/^\d{8,14}$/.test(clean)) {
+      setLookupStatus('idle');
+      return;
+    }
+
+    const delay = clean === initialBarcode.trim() ? 50 : 550;
+    const timer = setTimeout(() => {
+      void runBarcodeLookup(clean);
+    }, delay);
+
+    return () => clearTimeout(timer);
+  }, [barcode, initialBarcode, isEditing, canEditPrices, runBarcodeLookup]);
 
   if (!canEditPrices) {
     return (
@@ -185,7 +250,7 @@ export function ProductFormScreen({
       setErrorMsg(
         syncMode === 'cloud'
           ? 'Erro ao salvar produto na nuvem.'
-          : 'Erro ao gravar produto no banco local.',
+          : 'Erro ao gravar produto na conta local.',
       );
     } finally {
       setSaving(false);
@@ -203,7 +268,7 @@ export function ProductFormScreen({
             <h2 className="text-xl font-extrabold text-[#131b2e]">
               {syncMode === 'cloud'
                 ? 'Produto Gravado e Sincronizado!'
-                : 'Produto Gravado Offline!'}
+                : 'Produto Gravado na Conta Local!'}
             </h2>
             <p className="text-sm text-[#434655] mt-1">
               {savedProduct.name} ·{' '}
@@ -249,15 +314,15 @@ export function ProductFormScreen({
               {isEditing
                 ? syncMode === 'cloud'
                   ? 'Produto encontrado na loja conectada'
-                  : 'Produto encontrado no banco local'
+                  : 'Produto encontrado na conta local'
                 : syncMode === 'cloud'
                   ? 'Código pronto para cadastro sincronizado'
-                  : 'Código pronto para cadastro offline'}
+                  : 'Código pronto para cadastro local'}
             </p>
             <p className="text-xs text-[#434655] mt-0.5">
               {isEditing
                 ? 'Atualize o preço de venda, seção ou estoque para aplicar na hora.'
-                : 'Preencha os dados essenciais para disponibilizar nos terminais.'}
+                : 'Ao digitar ou bipar um código EAN novo, buscamos nome e marca automaticamente.'}
             </p>
           </div>
         </div>
@@ -272,7 +337,7 @@ export function ProductFormScreen({
         )}
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          {/* Field 1: Barcode EAN */}
+          {/* Field 1: Barcode EAN + Smart Public Lookup */}
           <div className="flex flex-col gap-1.5">
             <div className="flex items-center justify-between">
               <label
@@ -288,28 +353,72 @@ export function ProductFormScreen({
                 </span>
               )}
             </div>
-            <div
-              className={`flex items-center h-12 px-3.5 rounded-xl border ${
-                lockBarcode
-                  ? 'bg-[#e2e7ff] border-[#c3c6d7] text-[#131b2e]'
-                  : 'bg-white border-[#cbd5e1] focus-within:border-[#2563eb]'
-              }`}
-            >
-              {lockBarcode && <Lock className="w-4 h-4 text-[#737686] mr-2.5 shrink-0" />}
-              <input
-                id="barcodeInput"
-                type="text"
-                inputMode="numeric"
-                value={barcode}
-                readOnly={lockBarcode}
-                onChange={(e) => setBarcode(e.target.value)}
-                placeholder="Ex: 7891000100103"
-                className="w-full bg-transparent font-mono text-sm font-bold tracking-wider outline-none"
-              />
-              {barcode.trim().length >= 8 && (
-                <CheckCircle2 className="w-5 h-5 text-[#006e2d] shrink-0" />
+            <div className="flex items-center gap-2">
+              <div
+                className={`flex-1 flex items-center h-12 px-3.5 rounded-xl border ${
+                  lockBarcode
+                    ? 'bg-[#e2e7ff] border-[#c3c6d7] text-[#131b2e]'
+                    : 'bg-white border-[#cbd5e1] focus-within:border-[#2563eb]'
+                }`}
+              >
+                {lockBarcode && <Lock className="w-4 h-4 text-[#737686] mr-2.5 shrink-0" />}
+                <input
+                  id="barcodeInput"
+                  type="text"
+                  inputMode="numeric"
+                  value={barcode}
+                  readOnly={lockBarcode}
+                  onChange={(e) => setBarcode(e.target.value)}
+                  placeholder="Ex: 7891000100103"
+                  className="w-full bg-transparent font-mono text-sm font-bold tracking-wider outline-none"
+                />
+                {barcode.trim().length >= 8 && (
+                  <CheckCircle2 className="w-5 h-5 text-[#006e2d] shrink-0" />
+                )}
+              </div>
+
+              {!isEditing && barcode.trim().length >= 8 && (
+                <button
+                  type="button"
+                  onClick={() => void runBarcodeLookup(barcode, true)}
+                  disabled={lookupStatus === 'loading'}
+                  className="h-12 px-3.5 rounded-xl bg-[#eaedff] hover:bg-[#dae2fd] text-[#004ac6] text-xs font-bold flex items-center gap-1.5 shrink-0"
+                >
+                  {lookupStatus === 'loading' ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Search className="w-4 h-4" />
+                  )}
+                  <span className="hidden sm:inline">Buscar EAN</span>
+                </button>
               )}
             </div>
+
+            {!isEditing && lookupStatus !== 'idle' && (
+              <div className="flex items-center gap-1.5 text-xs px-1">
+                {lookupStatus === 'loading' && (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-[#004ac6]" />
+                    <span className="text-[#434655] font-medium">
+                      Buscando informações públicas para este código...
+                    </span>
+                  </>
+                )}
+                {lookupStatus === 'found' && (
+                  <>
+                    <Sparkles className="w-3.5 h-3.5 text-[#006e2d]" />
+                    <span className="text-[#006e2d] font-bold">
+                      Nome preenchido automaticamente via {lookupSource}
+                    </span>
+                  </>
+                )}
+                {lookupStatus === 'not_found' && (
+                  <span className="text-[#434655]">
+                    Produto não encontrado na base pública. Preencha os dados manualmente.
+                  </span>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Field 2: Product Name */}
@@ -326,15 +435,21 @@ export function ProductFormScreen({
                 type="text"
                 required
                 value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Ex: Café Torrado e Moído Pilão 500g"
+                onChange={(e) => {
+                  nameDirtyRef.current = e.target.value.trim().length > 0;
+                  setName(e.target.value);
+                }}
+                placeholder="Ex: Café Torrado e Moído 500g"
                 className="w-full h-12 pl-3.5 pr-11 bg-transparent text-sm md:text-base font-semibold text-[#131b2e] outline-none"
               />
               {name && (
                 <button
                   type="button"
                   aria-label="Limpar nome"
-                  onClick={() => setName('')}
+                  onClick={() => {
+                    nameDirtyRef.current = false;
+                    setName('');
+                  }}
                   className="absolute right-2 w-8 h-8 rounded-full flex items-center justify-center text-[#737686] hover:text-[#131b2e] hover:bg-[#eaedff]"
                 >
                   <X className="w-4 h-4" />
@@ -410,7 +525,10 @@ export function ProductFormScreen({
                   <button
                     key={cat}
                     type="button"
-                    onClick={() => setCategory(cat)}
+                    onClick={() => {
+                      categoryDirtyRef.current = true;
+                      setCategory(cat);
+                    }}
                     className={`px-3.5 py-2 rounded-full text-xs font-bold transition-all min-h-[38px] ${
                       active
                         ? 'bg-[#004ac6] text-white shadow-sm'
@@ -457,7 +575,10 @@ export function ProductFormScreen({
                 id="brandInput"
                 type="text"
                 value={brand}
-                onChange={(e) => setBrand(e.target.value)}
+                onChange={(e) => {
+                  brandDirtyRef.current = e.target.value.trim().length > 0;
+                  setBrand(e.target.value);
+                }}
                 placeholder="Ex: Pilão"
                 className="bg-white h-11 px-3 rounded-xl border border-[#cbd5e1] focus:border-[#2563eb] text-sm font-medium text-[#131b2e] outline-none"
               />
@@ -475,7 +596,10 @@ export function ProductFormScreen({
                   id="weightInput"
                   type="text"
                   value={weightLabel}
-                  onChange={(e) => setWeightLabel(e.target.value)}
+                  onChange={(e) => {
+                    weightDirtyRef.current = e.target.value.trim().length > 0;
+                    setWeightLabel(e.target.value);
+                  }}
                   placeholder="500g"
                   className="bg-white h-11 px-3 rounded-xl border border-[#cbd5e1] text-sm font-semibold text-[#131b2e] outline-none"
                 />
@@ -547,7 +671,7 @@ export function ProductFormScreen({
                   ? 'Gravando...'
                   : syncMode === 'cloud'
                     ? 'Salvar Produto na Nuvem'
-                    : 'Salvar Produto no Banco Local'}
+                    : 'Salvar Produto na Conta Local'}
               </span>
             </button>
 

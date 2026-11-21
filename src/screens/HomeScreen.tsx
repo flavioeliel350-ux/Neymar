@@ -3,7 +3,7 @@ import {
   ArrowRight,
   Barcode,
   Cloud,
-  Database,
+  HardDrive,
   History,
   Lock,
   PlusCircle,
@@ -19,7 +19,7 @@ interface HomeScreenProps {
   products: Product[];
   logs: ScanLog[];
   todayScans: number;
-  syncMode: 'cloud' | 'offline';
+  syncMode: 'cloud' | 'local';
   storeName?: string;
   activeOperator?: StoreOperator | null;
   canEditPrices: boolean;
@@ -107,44 +107,38 @@ export function HomeScreen({
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="min-w-0">
                 <p className="text-[11px] font-bold uppercase tracking-wider text-[#004ac6]">
-                  {syncMode === 'cloud' && activeOperator
+                  {activeOperator
                     ? `${activeOperator.code} · ${activeOperator.role === 'admin' ? 'Perfil Gerente' : 'Perfil Operador'}`
-                    : 'Terminal Ativo · Modo Local'}
+                    : 'Terminal Ativo'}
                 </p>
                 <h1 className="text-xl md:text-2xl font-extrabold text-[#131b2e] tracking-tight mt-0.5 truncate">
                   {storeName || 'Operação de Caixa e Gôndola'}
                 </h1>
               </div>
 
-              {syncMode === 'cloud' ? (
-                <button
-                  type="button"
-                  onClick={onOpenAccount}
-                  className="text-xs font-bold text-[#006e2d] bg-[#dcfce7] hover:bg-[#bbf7d0] px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors"
-                >
-                  Nuvem + Cache Offline
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={onOpenAccount}
-                  className="text-xs font-bold text-[#004ac6] bg-[#eaedff] hover:bg-[#dae2fd] px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors"
-                >
-                  Conectar Nuvem
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={onOpenAccount}
+                className={`text-xs font-bold px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors ${
+                  syncMode === 'cloud'
+                    ? 'text-[#006e2d] bg-[#dcfce7] hover:bg-[#bbf7d0]'
+                    : 'text-[#006058] bg-[#e6fffa] hover:bg-[#ccfbf1]'
+                }`}
+              >
+                {syncMode === 'cloud' ? 'Nuvem + Cache Offline' : 'Conta Local Offline'}
+              </button>
             </div>
 
             <div className="mt-3 flex items-center gap-2 text-xs text-[#434655] bg-[#f2f3ff] px-3 py-2 rounded-lg">
               {syncMode === 'cloud' ? (
                 <Cloud className="w-4 h-4 text-[#006e2d] shrink-0" />
               ) : (
-                <Database className="w-4 h-4 text-[#006058] shrink-0" />
+                <HardDrive className="w-4 h-4 text-[#006058] shrink-0" />
               )}
               <span className="truncate">
                 {syncMode === 'cloud'
-                  ? `Firestore Online · Cache Offline Ativo · ${activeOperator?.name || 'Operador'}`
-                  : 'Banco Local IndexedDB · Entre com Google para sincronizar entre aparelhos'}
+                  ? `Loja Isolada na Nuvem · Sincronização em Tempo Real · ${activeOperator?.name || 'Operador'}`
+                  : `Banco Local Isolado · Sem Internet · ${activeOperator?.name || 'Operador'}`}
               </span>
             </div>
           </section>
@@ -323,7 +317,7 @@ export function HomeScreen({
                   {products.length.toLocaleString('pt-BR')}
                 </p>
                 <p className="text-xs text-[#434655] mt-0.5">
-                  {syncMode === 'cloud' ? 'Itens sincronizados' : 'Itens salvos offline'}
+                  {syncMode === 'cloud' ? 'Itens sincronizados' : 'Itens nesta loja'}
                 </p>
               </div>
             </button>
@@ -364,8 +358,21 @@ export function HomeScreen({
             </div>
 
             {recentLogs.length === 0 ? (
-              <div className="py-6 text-center text-xs text-[#434655]">
-                Nenhuma consulta registrada ainda. Clique em Consultar Preço para começar.
+              <div className="py-6 text-center flex flex-col items-center gap-2">
+                <p className="text-xs text-[#434655]">
+                  {products.length === 0
+                    ? 'Catálogo limpo. Cadastre seu primeiro produto pelo botão acima ou digitando o EAN.'
+                    : 'Nenhuma consulta registrada ainda. Clique em Consultar Preço para começar.'}
+                </p>
+                {products.length === 0 && canEditPrices && (
+                  <button
+                    type="button"
+                    onClick={() => onNavigate('form')}
+                    className="mt-1 px-3.5 py-2 rounded-lg bg-[#007b71] hover:bg-[#006058] text-white text-xs font-bold"
+                  >
+                    Cadastrar Primeiro Produto
+                  </button>
+                )}
               </div>
             ) : (
               <div className="flex flex-col gap-2">
@@ -378,8 +385,10 @@ export function HomeScreen({
                       onClick={() => {
                         if (matchedProduct) {
                           onOpenProduct(matchedProduct);
-                        } else {
+                        } else if (canEditPrices) {
                           onRegisterBarcode(log.barcode);
+                        } else {
+                          onOpenAccount();
                         }
                       }}
                       className="w-full flex items-center justify-between gap-3 p-2.5 bg-[#f2f3ff] hover:bg-[#eaedff] active:scale-[0.99] rounded-xl text-left transition-all min-h-[60px]"
