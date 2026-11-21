@@ -9,6 +9,8 @@ export const CATEGORIES: Category[] = [
   'Outros',
 ];
 
+export type UserRole = 'admin' | 'operator';
+
 export interface Product {
   barcode: string;
   name: string;
@@ -32,7 +34,33 @@ export interface ScanLog {
   productName: string;
   price: number;
   action: 'consulta' | 'cadastro' | 'ajuste';
+  operator?: string;
   timestamp: string;
+}
+
+export interface UserProfile {
+  uid: string;
+  displayName: string;
+  email: string;
+  role: UserRole;
+  storeId: string;
+}
+
+export interface StoreInfo {
+  storeId: string;
+  name: string;
+  ownerId: string;
+}
+
+export interface StoreOperator {
+  id: string;
+  storeId: string;
+  ownerId: string;
+  name: string;
+  code: string;
+  role: UserRole;
+  pin: string;
+  active: boolean;
 }
 
 export type ScannerMode = 'query' | 'register';

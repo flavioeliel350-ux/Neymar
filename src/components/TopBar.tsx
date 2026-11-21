@@ -1,21 +1,35 @@
 import React from 'react';
-import { ArrowLeft, ScanBarcode } from 'lucide-react';
-import { AppView, ScannerMode } from '../types/product';
+import { ArrowLeft, Cloud, ScanBarcode, UserCircle2 } from 'lucide-react';
+import { AppView, ScannerMode, StoreOperator } from '../types/product';
 
 interface TopBarProps {
   view: AppView;
   title?: string;
+  syncMode: 'cloud' | 'offline';
+  activeOperator?: StoreOperator | null;
   onNavigate: (view: AppView, mode?: ScannerMode) => void;
   onBack?: () => void;
+  onOpenAccount: () => void;
 }
 
-export function TopBar({ view, title, onNavigate, onBack }: TopBarProps) {
+export function TopBar({
+  view,
+  title,
+  syncMode,
+  activeOperator,
+  onNavigate,
+  onBack,
+  onOpenAccount,
+}: TopBarProps) {
   const isStackView = view === 'details' || view === 'form';
+  const operatorLabel = activeOperator
+    ? `${activeOperator.code} · ${activeOperator.role === 'admin' ? 'Gerente' : 'Operador'}`
+    : 'Entrar / Nuvem';
 
   if (isStackView) {
     return (
       <header className="sticky top-0 z-40 w-full pt-safe bg-[#faf8ff]/90 backdrop-blur-xl border-b border-[#e2e7ff]">
-        <div className="max-w-6xl mx-auto h-14 px-3 md:px-6 flex items-center justify-between gap-4">
+        <div className="max-w-6xl mx-auto h-14 px-3 md:px-6 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 min-w-0">
             <button
               type="button"
@@ -30,19 +44,36 @@ export function TopBar({ view, title, onNavigate, onBack }: TopBarProps) {
                 {title || 'Detalhes'}
               </h1>
               <span className="text-[11px] font-medium text-[#434655] truncate">
-                Banco Local · Armazenamento Offline
+                {syncMode === 'cloud'
+                  ? `Nuvem Sincronizada · ${activeOperator?.code || 'Op. 01'}`
+                  : 'Banco Local · Armazenamento Offline'}
               </span>
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={() => onNavigate('scanner', 'query')}
-            className="hidden sm:inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2563eb] text-white text-xs font-bold whitespace-nowrap shrink-0 hover:bg-[#004ac6] active:brightness-90 transition-all"
-          >
-            <ScanBarcode className="w-4 h-4" />
-            <span>Bipar Produto</span>
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={onOpenAccount}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#eaedff] hover:bg-[#dae2fd] text-[#131b2e] text-xs font-bold whitespace-nowrap shrink-0 min-h-[40px]"
+            >
+              {syncMode === 'cloud' ? (
+                <Cloud className="w-4 h-4 text-[#006e2d]" />
+              ) : (
+                <UserCircle2 className="w-4 h-4 text-[#004ac6]" />
+              )}
+              <span>{syncMode === 'cloud' ? activeOperator?.code || 'Op. 01' : 'Entrar'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onNavigate('scanner', 'query')}
+              className="hidden sm:inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2563eb] text-white text-xs font-bold whitespace-nowrap shrink-0 hover:bg-[#004ac6] active:brightness-90 transition-all min-h-[40px]"
+            >
+              <ScanBarcode className="w-4 h-4" />
+              <span>Bipar Produto</span>
+            </button>
+          </div>
         </div>
       </header>
     );
@@ -50,7 +81,7 @@ export function TopBar({ view, title, onNavigate, onBack }: TopBarProps) {
 
   return (
     <header className="sticky top-0 z-40 w-full pt-safe bg-[#faf8ff]/90 backdrop-blur-xl border-b border-[#e2e7ff]">
-      <div className="max-w-6xl mx-auto h-14 px-3 md:px-6 flex items-center justify-between gap-8">
+      <div className="max-w-6xl mx-auto h-14 px-3 md:px-6 flex items-center justify-between gap-4">
         <button
           type="button"
           onClick={() => onNavigate('home')}
@@ -107,11 +138,28 @@ export function TopBar({ view, title, onNavigate, onBack }: TopBarProps) {
           </button>
         </nav>
 
-        <div className="flex items-center shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={onOpenAccount}
+            className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold whitespace-nowrap shrink-0 transition-all min-h-[40px] ${
+              syncMode === 'cloud'
+                ? 'bg-[#dcfce7] text-[#005320] hover:bg-[#bbf7d0]'
+                : 'bg-[#eaedff] text-[#004ac6] hover:bg-[#dae2fd]'
+            }`}
+          >
+            {syncMode === 'cloud' ? (
+              <Cloud className="w-4 h-4 shrink-0" />
+            ) : (
+              <UserCircle2 className="w-4 h-4 shrink-0" />
+            )}
+            <span>{operatorLabel}</span>
+          </button>
+
           <button
             type="button"
             onClick={() => onNavigate('scanner', 'query')}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2563eb] text-white text-xs font-bold whitespace-nowrap shrink-0 hover:bg-[#004ac6] active:brightness-90 transition-all min-h-[40px]"
+            className="hidden sm:inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2563eb] text-white text-xs font-bold whitespace-nowrap shrink-0 hover:bg-[#004ac6] active:brightness-90 transition-all min-h-[40px]"
           >
             <ScanBarcode className="w-4 h-4" />
             <span>Bipar Produto</span>

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import {
   CheckCircle2,
   CloudUpload,
+  KeyRound,
   Lock,
   ScanBarcode,
   Store,
@@ -15,11 +16,15 @@ interface ProductFormScreenProps {
   initialBarcode?: string;
   existingProduct?: Product | null;
   lockBarcode?: boolean;
+  syncMode: 'cloud' | 'offline';
+  canEditPrices: boolean;
+  operatorCode: string;
   onSave: (product: Omit<Product, 'updatedAt'>) => Promise<Product>;
   onDelete?: (barcode: string) => Promise<void>;
   onContinueScanning: () => void;
   onViewProduct: (product: Product) => void;
   onCancel: () => void;
+  onOpenAccount: () => void;
 }
 
 function parsePriceInput(raw: string): number {
@@ -36,11 +41,15 @@ export function ProductFormScreen({
   initialBarcode = '',
   existingProduct = null,
   lockBarcode = false,
+  syncMode,
+  canEditPrices,
+  operatorCode,
   onSave,
   onDelete,
   onContinueScanning,
   onViewProduct,
   onCancel,
+  onOpenAccount,
 }: ProductFormScreenProps) {
   const isEditing = Boolean(existingProduct);
 
@@ -75,6 +84,43 @@ export function ProductFormScreen({
   const [saving, setSaving] = useState(false);
   const [savedProduct, setSavedProduct] = useState<Product | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+
+  if (!canEditPrices) {
+    return (
+      <div className="w-full max-w-xl mx-auto px-3 md:px-6 py-8">
+        <div className="bg-white rounded-2xl border border-[#e2e7ff] p-6 text-center flex flex-col items-center gap-4 shadow-sm">
+          <div className="w-14 h-14 rounded-full bg-[#eaedff] text-[#004ac6] flex items-center justify-center">
+            <Lock className="w-7 h-7" />
+          </div>
+          <div>
+            <h2 className="text-lg font-extrabold text-[#131b2e]">
+              Acesso Restrito ao Perfil Gerente
+            </h2>
+            <p className="text-sm text-[#434655] mt-1">
+              O operador atual ({operatorCode}) tem permissão para consultar preços e ajustar estoque no balcão. Para alterar preços ou cadastrar produtos, troque para um Gerente com PIN.
+            </p>
+          </div>
+          <div className="w-full flex flex-col sm:flex-row gap-2.5 pt-2">
+            <button
+              type="button"
+              onClick={onOpenAccount}
+              className="flex-1 h-12 rounded-xl bg-[#2563eb] hover:bg-[#004ac6] text-white font-bold text-sm flex items-center justify-center gap-2"
+            >
+              <KeyRound className="w-4 h-4" />
+              <span>Trocar para Gerente (PIN)</span>
+            </button>
+            <button
+              type="button"
+              onClick={onCancel}
+              className="flex-1 h-12 rounded-xl bg-[#eaedff] hover:bg-[#dae2fd] text-[#131b2e] font-bold text-sm flex items-center justify-center"
+            >
+              Voltar
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const adjustPrice = (delta: number) => {
     const current = parsePriceInput(priceStr);
@@ -130,13 +176,17 @@ export function ProductFormScreen({
         location: location.trim() || 'Balcão',
         weightLabel: weightLabel.trim() || 'un',
         description: description.trim(),
-        operator: 'Op. 01',
+        operator: operatorCode || 'Op. 01',
       });
       playBeep('save');
       triggerHaptic(40);
       setSavedProduct(saved);
     } catch {
-      setErrorMsg('Erro ao gravar produto no banco local.');
+      setErrorMsg(
+        syncMode === 'cloud'
+          ? 'Erro ao salvar produto na nuvem.'
+          : 'Erro ao gravar produto no banco local.',
+      );
     } finally {
       setSaving(false);
     }
@@ -151,7 +201,9 @@ export function ProductFormScreen({
           </div>
           <div>
             <h2 className="text-xl font-extrabold text-[#131b2e]">
-              Produto Gravado Offline!
+              {syncMode === 'cloud'
+                ? 'Produto Gravado e Sincronizado!'
+                : 'Produto Gravado Offline!'}
             </h2>
             <p className="text-sm text-[#434655] mt-1">
               {savedProduct.name} ·{' '}
@@ -195,13 +247,17 @@ export function ProductFormScreen({
           <div className="min-w-0">
             <p className="text-sm font-extrabold text-[#005320]">
               {isEditing
-                ? 'Produto encontrado no banco local'
-                : 'Código pronto para cadastro offline'}
+                ? syncMode === 'cloud'
+                  ? 'Produto encontrado na loja conectada'
+                  : 'Produto encontrado no banco local'
+                : syncMode === 'cloud'
+                  ? 'Código pronto para cadastro sincronizado'
+                  : 'Código pronto para cadastro offline'}
             </p>
             <p className="text-xs text-[#434655] mt-0.5">
               {isEditing
                 ? 'Atualize o preço de venda, seção ou estoque para aplicar na hora.'
-                : 'Preencha os dados essenciais e salve no armazenamento local.'}
+                : 'Preencha os dados essenciais para disponibilizar nos terminais.'}
             </p>
           </div>
         </div>
@@ -487,7 +543,11 @@ export function ProductFormScreen({
             >
               <CloudUpload className="w-5 h-5" />
               <span>
-                {saving ? 'Gravando...' : 'Salvar Produto no Banco Local'}
+                {saving
+                  ? 'Gravando...'
+                  : syncMode === 'cloud'
+                    ? 'Salvar Produto na Nuvem'
+                    : 'Salvar Produto no Banco Local'}
               </span>
             </button>
 

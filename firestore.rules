@@ -1,0 +1,275 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net: Default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Global Hardened Primitives ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isOwner(uid) {
+      return isVerified() && request.auth.uid == uid;
+    }
+
+    function isTokenAdmin() {
+      return isVerified() && request.auth.token.email == 'flavioeliel350@gmail.com';
+    }
+
+    function isAdmin() {
+      return isTokenAdmin() || (isVerified() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+    }
+
+    function isStoreOwner(storeId) {
+      return isVerified()
+        && exists(/databases/$(database)/documents/stores/$(storeId))
+        && get(/databases/$(database)/documents/stores/$(storeId)).data.ownerId == request.auth.uid;
+    }
+
+    // --- Validation Blueprints ---
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'displayName', 'email', 'role', 'storeId', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'displayName', 'email', 'role', 'storeId', 'createdAt', 'updatedAt'])
+        && data.uid is string && isValidId(data.uid)
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 120
+        && data.role in ['admin', 'operator']
+        && data.storeId is string && isValidId(data.storeId)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidStore(data) {
+      return data.keys().hasAll(['storeId', 'name', 'ownerId', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['storeId', 'name', 'ownerId', 'createdAt', 'updatedAt'])
+        && data.storeId is string && isValidId(data.storeId)
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 100
+        && data.ownerId is string && isValidId(data.ownerId)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidOperator(data) {
+      return data.keys().hasAll(['id', 'storeId', 'ownerId', 'name', 'code', 'role', 'pin', 'active', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'storeId', 'ownerId', 'name', 'code', 'role', 'pin', 'active', 'createdAt', 'updatedAt'])
+        && data.id is string && isValidId(data.id)
+        && data.storeId is string && isValidId(data.storeId)
+        && data.ownerId is string && isValidId(data.ownerId)
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 60
+        && data.code is string && data.code.size() >= 1 && data.code.size() <= 20
+        && data.role in ['admin', 'operator']
+        && data.pin is string && data.pin.size() == 4 && data.pin.matches('^[0-9]{4}$')
+        && data.active is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidProduct(data) {
+      return data.keys().hasAll([
+          'barcode', 'storeId', 'ownerId', 'name', 'brand', 'category',
+          'price', 'wholesalePrice', 'clubPrice', 'marginPercent', 'stock',
+          'location', 'weightLabel', 'description', 'operator', 'updatedBy',
+          'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'barcode', 'storeId', 'ownerId', 'name', 'brand', 'category',
+          'price', 'wholesalePrice', 'clubPrice', 'marginPercent', 'stock',
+          'location', 'weightLabel', 'description', 'operator', 'updatedBy',
+          'createdAt', 'updatedAt'
+        ])
+        && data.barcode is string && data.barcode.size() >= 1 && data.barcode.size() <= 32 && data.barcode.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.storeId is string && isValidId(data.storeId)
+        && data.ownerId is string && isValidId(data.ownerId)
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 120
+        && data.brand is string && data.brand.size() >= 1 && data.brand.size() <= 60
+        && data.category in ['Mercearia', 'Bebidas', 'Limpeza', 'Frios', 'Padaria', 'Outros']
+        && data.price is number && data.price > 0 && data.price <= 1000000
+        && data.wholesalePrice is number && data.wholesalePrice >= 0 && data.wholesalePrice <= 1000000
+        && data.clubPrice is number && data.clubPrice >= 0 && data.clubPrice <= 1000000
+        && data.marginPercent is number && data.marginPercent >= 0 && data.marginPercent <= 100
+        && data.stock is number && data.stock >= 0 && data.stock <= 1000000
+        && data.location is string && data.location.size() >= 1 && data.location.size() <= 80
+        && data.weightLabel is string && data.weightLabel.size() >= 1 && data.weightLabel.size() <= 24
+        && data.description is string && data.description.size() <= 240
+        && data.operator is string && data.operator.size() >= 1 && data.operator.size() <= 32
+        && data.updatedBy is string && data.updatedBy == request.auth.uid
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidScanLog(data) {
+      return data.keys().hasAll([
+          'id', 'storeId', 'ownerId', 'barcode', 'productName',
+          'price', 'action', 'operator', 'userId', 'timestamp'
+        ])
+        && data.keys().hasOnly([
+          'id', 'storeId', 'ownerId', 'barcode', 'productName',
+          'price', 'action', 'operator', 'userId', 'timestamp'
+        ])
+        && data.id is string && isValidId(data.id)
+        && data.storeId is string && isValidId(data.storeId)
+        && data.ownerId is string && isValidId(data.ownerId)
+        && data.barcode is string && data.barcode.size() >= 1 && data.barcode.size() <= 32 && data.barcode.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.productName is string && data.productName.size() >= 1 && data.productName.size() <= 120
+        && data.price is number && data.price >= 0 && data.price <= 1000000
+        && data.action in ['consulta', 'cadastro', 'ajuste']
+        && data.operator is string && data.operator.size() >= 1 && data.operator.size() <= 32
+        && data.userId is string && data.userId == request.auth.uid
+        && data.timestamp is timestamp;
+    }
+
+    // --- Collection Rules ---
+
+    match /admins/{userId} {
+      allow get: if isValidId(userId) && isOwner(userId);
+      allow list, write: if false;
+    }
+
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isVerified() && (existing().uid == request.auth.uid || isTokenAdmin());
+      allow create: if isValidId(userId)
+        && isOwner(userId)
+        && isValidUser(incoming())
+        && incoming().uid == userId
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && (incoming().role == 'operator' || isAdmin());
+      allow update: if isValidId(userId)
+        && isVerified()
+        && isValidUser(incoming())
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          (isOwner(userId)
+            && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'updatedAt'])
+            && incoming().role == existing().role
+            && incoming().storeId == existing().storeId
+            && incoming().email == existing().email)
+          ||
+          (isAdmin()
+            && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'role', 'storeId', 'updatedAt']))
+        );
+      allow delete: if isValidId(userId) && isAdmin();
+    }
+
+    match /stores/{storeId} {
+      allow get: if isValidId(storeId) && isVerified() && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isVerified() && (existing().ownerId == request.auth.uid || isTokenAdmin());
+      allow create: if isValidId(storeId)
+        && isVerified()
+        && isValidStore(incoming())
+        && incoming().storeId == storeId
+        && incoming().ownerId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(storeId)
+        && isVerified()
+        && isValidStore(incoming())
+        && incoming().storeId == existing().storeId
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (existing().ownerId == request.auth.uid || isAdmin())
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'updatedAt']);
+      allow delete: if isValidId(storeId) && isVerified() && (existing().ownerId == request.auth.uid || isAdmin());
+
+      match /operators/{operatorId} {
+        allow get: if isValidId(storeId) && isValidId(operatorId) && isVerified() && (isStoreOwner(storeId) || isAdmin());
+        allow list: if isVerified() && (storeId == request.auth.uid || existing().ownerId == request.auth.uid || isTokenAdmin());
+        allow create: if isValidId(storeId)
+          && isValidId(operatorId)
+          && isVerified()
+          && isValidOperator(incoming())
+          && incoming().id == operatorId
+          && incoming().storeId == storeId
+          && incoming().ownerId == request.auth.uid
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && (isStoreOwner(storeId) || isAdmin());
+        allow update: if isValidId(storeId)
+          && isValidId(operatorId)
+          && isVerified()
+          && isValidOperator(incoming())
+          && incoming().id == existing().id
+          && incoming().storeId == existing().storeId
+          && incoming().ownerId == existing().ownerId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (isStoreOwner(storeId) || isAdmin())
+          && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'code', 'role', 'pin', 'active', 'updatedAt']);
+        allow delete: if isValidId(storeId) && isValidId(operatorId) && isVerified() && (isStoreOwner(storeId) || isAdmin());
+      }
+
+      match /products/{barcode} {
+        allow get: if isValidId(storeId) && isValidId(barcode) && isVerified() && (isStoreOwner(storeId) || isAdmin());
+        allow list: if isVerified() && (storeId == request.auth.uid || existing().ownerId == request.auth.uid || isTokenAdmin());
+        allow create: if isValidId(storeId)
+          && isValidId(barcode)
+          && isVerified()
+          && isValidProduct(incoming())
+          && incoming().barcode == barcode
+          && incoming().storeId == storeId
+          && incoming().ownerId == request.auth.uid
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && (isStoreOwner(storeId) || isAdmin());
+        allow update: if isValidId(storeId)
+          && isValidId(barcode)
+          && isVerified()
+          && isValidProduct(incoming())
+          && incoming().barcode == existing().barcode
+          && incoming().storeId == existing().storeId
+          && incoming().ownerId == existing().ownerId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (isStoreOwner(storeId) || isAdmin())
+          && (
+            incoming().diff(existing()).affectedKeys().hasOnly(['stock', 'operator', 'updatedBy', 'updatedAt'])
+            || incoming().diff(existing()).affectedKeys().hasOnly([
+              'name', 'brand', 'category', 'price', 'wholesalePrice',
+              'clubPrice', 'marginPercent', 'stock', 'location',
+              'weightLabel', 'description', 'operator', 'updatedBy', 'updatedAt'
+            ])
+          );
+        allow delete: if isValidId(storeId) && isValidId(barcode) && isVerified() && (isStoreOwner(storeId) || isAdmin());
+      }
+
+      match /scanLogs/{logId} {
+        allow get: if isValidId(storeId) && isValidId(logId) && isVerified() && (isStoreOwner(storeId) || isAdmin());
+        allow list: if isVerified() && (storeId == request.auth.uid || existing().ownerId == request.auth.uid || isTokenAdmin());
+        allow create: if isValidId(storeId)
+          && isValidId(logId)
+          && isVerified()
+          && isValidScanLog(incoming())
+          && incoming().id == logId
+          && incoming().storeId == storeId
+          && incoming().ownerId == request.auth.uid
+          && incoming().timestamp == request.time
+          && (isStoreOwner(storeId) || isAdmin());
+        allow update, delete: if false;
+      }
+    }
+  }
+}

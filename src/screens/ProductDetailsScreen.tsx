@@ -6,6 +6,7 @@ import {
   Edit3,
   History,
   Layers,
+  Lock,
   Minus,
   Package,
   Plus,
@@ -23,16 +24,22 @@ import { ProductVisual } from '../components/ProductVisual';
 
 interface ProductDetailsScreenProps {
   product: Product;
+  syncMode: 'cloud' | 'offline';
+  canEditPrices: boolean;
   onScanNext: () => void;
   onEdit: (product: Product) => void;
   onAdjustStock: (barcode: string, delta: number) => void;
+  onRequireManager: () => void;
 }
 
 export function ProductDetailsScreen({
   product,
+  syncMode,
+  canEditPrices,
   onScanNext,
   onEdit,
   onAdjustStock,
+  onRequireManager,
 }: ProductDetailsScreenProps) {
   const { integer, decimal } = formatPriceParts(product.price);
   const wholesale =
@@ -48,7 +55,11 @@ export function ProductDetailsScreen({
         <div className="flex flex-wrap items-center justify-between gap-2 px-1">
           <div className="inline-flex items-center gap-1.5 text-xs font-bold text-[#006e2d]">
             <CheckCircle2 className="w-4 h-4 shrink-0" />
-            <span>Produto no Banco Local</span>
+            <span>
+              {syncMode === 'cloud'
+                ? 'Produto Sincronizado na Nuvem'
+                : 'Produto no Banco Local'}
+            </span>
           </div>
           <div className="inline-flex items-center gap-1.5 text-xs font-mono font-bold text-[#434655] bg-[#eaedff] px-2.5 py-1 rounded-lg">
             <Barcode className="w-3.5 h-3.5" />
@@ -224,12 +235,24 @@ export function ProductDetailsScreen({
             type="button"
             onClick={() => {
               triggerHaptic(25);
-              onEdit(product);
+              if (canEditPrices) {
+                onEdit(product);
+              } else {
+                onRequireManager();
+              }
             }}
             className="w-full h-14 rounded-xl bg-[#e2e7ff] hover:bg-[#dae2fd] text-[#131b2e] font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.99] transition-all"
           >
-            <Edit3 className="w-4 h-4 text-[#434655]" />
-            <span>Alterar Preço / Editar Cadastro</span>
+            {canEditPrices ? (
+              <Edit3 className="w-4 h-4 text-[#434655]" />
+            ) : (
+              <Lock className="w-4 h-4 text-[#004ac6]" />
+            )}
+            <span>
+              {canEditPrices
+                ? 'Alterar Preço / Editar Cadastro'
+                : 'Alterar Preço (Requer Gerente)'}
+            </span>
           </button>
         </div>
       </div>

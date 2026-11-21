@@ -2,14 +2,16 @@ import React, { useMemo, useState } from 'react';
 import {
   ArrowRight,
   Barcode,
+  Cloud,
   Database,
   History,
+  Lock,
   PlusCircle,
   QrCode,
   Search,
   Tag,
 } from 'lucide-react';
-import { AppView, Product, ScanLog, ScannerMode } from '../types/product';
+import { AppView, Product, ScanLog, ScannerMode, StoreOperator } from '../types/product';
 import { formatBRL, formatRelativeTime, triggerHaptic } from '../utils/feedback';
 import { ProductVisual } from '../components/ProductVisual';
 
@@ -17,20 +19,30 @@ interface HomeScreenProps {
   products: Product[];
   logs: ScanLog[];
   todayScans: number;
+  syncMode: 'cloud' | 'offline';
+  storeName?: string;
+  activeOperator?: StoreOperator | null;
+  canEditPrices: boolean;
   onStartScan: (mode: ScannerMode) => void;
   onOpenProduct: (product: Product) => void;
   onRegisterBarcode: (barcode: string) => void;
   onNavigate: (view: AppView) => void;
+  onOpenAccount: () => void;
 }
 
 export function HomeScreen({
   products,
   logs,
   todayScans,
+  syncMode,
+  storeName,
+  activeOperator,
+  canEditPrices,
   onStartScan,
   onOpenProduct,
   onRegisterBarcode,
   onNavigate,
+  onOpenAccount,
 }: HomeScreenProps) {
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -72,7 +84,11 @@ export function HomeScreen({
 
     if (isNumericEanCandidate && quickMatches.length === 0) {
       triggerHaptic(30);
-      onRegisterBarcode(trimmed);
+      if (canEditPrices) {
+        onRegisterBarcode(trimmed);
+      } else {
+        onOpenAccount();
+      }
       return;
     }
 
@@ -91,21 +107,44 @@ export function HomeScreen({
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="min-w-0">
                 <p className="text-[11px] font-bold uppercase tracking-wider text-[#004ac6]">
-                  Terminal Ativo · Balcão 04
+                  {syncMode === 'cloud' && activeOperator
+                    ? `${activeOperator.code} · ${activeOperator.role === 'admin' ? 'Perfil Gerente' : 'Perfil Operador'}`
+                    : 'Terminal Ativo · Modo Local'}
                 </p>
-                <h1 className="text-xl md:text-2xl font-extrabold text-[#131b2e] tracking-tight mt-0.5">
-                  Operação de Caixa e Gôndola
+                <h1 className="text-xl md:text-2xl font-extrabold text-[#131b2e] tracking-tight mt-0.5 truncate">
+                  {storeName || 'Operação de Caixa e Gôndola'}
                 </h1>
               </div>
-              <span className="text-xs font-bold text-[#006e2d] bg-[#dcfce7] px-3 py-1 rounded-lg whitespace-nowrap">
-                Offline Ativo
-              </span>
+
+              {syncMode === 'cloud' ? (
+                <button
+                  type="button"
+                  onClick={onOpenAccount}
+                  className="text-xs font-bold text-[#006e2d] bg-[#dcfce7] hover:bg-[#bbf7d0] px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors"
+                >
+                  Nuvem + Cache Offline
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onOpenAccount}
+                  className="text-xs font-bold text-[#004ac6] bg-[#eaedff] hover:bg-[#dae2fd] px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors"
+                >
+                  Conectar Nuvem
+                </button>
+              )}
             </div>
 
             <div className="mt-3 flex items-center gap-2 text-xs text-[#434655] bg-[#f2f3ff] px-3 py-2 rounded-lg">
-              <Database className="w-4 h-4 text-[#006058] shrink-0" />
+              {syncMode === 'cloud' ? (
+                <Cloud className="w-4 h-4 text-[#006e2d] shrink-0" />
+              ) : (
+                <Database className="w-4 h-4 text-[#006058] shrink-0" />
+              )}
               <span className="truncate">
-                Banco Local IndexedDB · Persistência Instantânea · Pronto para Venda
+                {syncMode === 'cloud'
+                  ? `Firestore Online · Cache Offline Ativo · ${activeOperator?.name || 'Operador'}`
+                  : 'Banco Local IndexedDB · Entre com Google para sincronizar entre aparelhos'}
               </span>
             </div>
           </section>
@@ -148,16 +187,28 @@ export function HomeScreen({
               type="button"
               onClick={() => {
                 triggerHaptic(35);
-                onStartScan('register');
+                if (canEditPrices) {
+                  onStartScan('register');
+                } else {
+                  onOpenAccount();
+                }
               }}
-              className="group relative flex flex-col justify-between text-left bg-[#007b71] hover:bg-[#006058] active:scale-[0.99] active:brightness-95 transition-all duration-150 rounded-2xl p-5 text-white min-h-[132px] shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#006058] focus-visible:ring-offset-2"
+              className={`group relative flex flex-col justify-between text-left transition-all duration-150 rounded-2xl p-5 text-white min-h-[132px] shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#006058] focus-visible:ring-offset-2 ${
+                canEditPrices
+                  ? 'bg-[#007b71] hover:bg-[#006058] active:scale-[0.99] active:brightness-95'
+                  : 'bg-[#434655] hover:bg-[#313444]'
+              }`}
             >
               <div className="flex items-start justify-between w-full">
                 <div className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center shrink-0">
-                  <Tag className="w-6 h-6 text-white" />
+                  {canEditPrices ? (
+                    <Tag className="w-6 h-6 text-white" />
+                  ) : (
+                    <Lock className="w-6 h-6 text-white" />
+                  )}
                 </div>
                 <span className="text-[11px] font-semibold text-white/90 whitespace-nowrap">
-                  Ajuste &amp; Estoque
+                  {canEditPrices ? 'Ajuste & Estoque' : 'Requer PIN Gerente'}
                 </span>
               </div>
 
@@ -168,8 +219,10 @@ export function HomeScreen({
                   </span>
                   <PlusCircle className="w-6 h-6 shrink-0 group-hover:translate-x-0.5 transition-transform" />
                 </div>
-                <p className="text-xs md:text-sm text-[#b3fff3] mt-1">
-                  Bipar novo produto ou alterar preço de venda na gôndola
+                <p className="text-xs md:text-sm text-white/85 mt-1">
+                  {canEditPrices
+                    ? 'Bipar novo produto ou alterar preço de venda na gôndola'
+                    : 'Toque para liberar alteração de preços com PIN de Gerente'}
                 </p>
               </div>
             </button>
@@ -233,7 +286,11 @@ export function HomeScreen({
                     {isNumericEanCandidate && (
                       <button
                         type="button"
-                        onClick={() => onRegisterBarcode(searchQuery.trim())}
+                        onClick={() =>
+                          canEditPrices
+                            ? onRegisterBarcode(searchQuery.trim())
+                            : onOpenAccount()
+                        }
                         className="px-3 py-1.5 rounded-lg bg-[#007b71] text-white text-xs font-bold whitespace-nowrap shrink-0 hover:bg-[#006058] transition-colors"
                       >
                         Cadastrar EAN
@@ -256,14 +313,18 @@ export function HomeScreen({
               className="text-left bg-white hover:bg-[#f2f3ff]/60 rounded-2xl p-4 border border-[#e2e7ff] transition-colors flex flex-col justify-between min-h-[112px]"
             >
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-[#434655]">Catálogo Local</span>
+                <span className="text-xs font-bold text-[#434655]">
+                  {syncMode === 'cloud' ? 'Catálogo Nuvem' : 'Catálogo Local'}
+                </span>
                 <span className="text-xs font-semibold text-[#004ac6]">Ver</span>
               </div>
               <div className="mt-2">
                 <p className="text-2xl md:text-3xl font-extrabold text-[#131b2e] tabular-nums tracking-tight">
                   {products.length.toLocaleString('pt-BR')}
                 </p>
-                <p className="text-xs text-[#434655] mt-0.5">Itens salvos offline</p>
+                <p className="text-xs text-[#434655] mt-0.5">
+                  {syncMode === 'cloud' ? 'Itens sincronizados' : 'Itens salvos offline'}
+                </p>
               </div>
             </button>
 

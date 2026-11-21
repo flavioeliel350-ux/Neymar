@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import {
   Download,
   History,
+  Lock,
   Package,
   Plus,
   RotateCcw,
@@ -14,17 +15,23 @@ import { ProductVisual } from '../components/ProductVisual';
 interface HistoryCatalogScreenProps {
   products: Product[];
   logs: ScanLog[];
+  syncMode: 'cloud' | 'offline';
+  canEditPrices: boolean;
   onOpenProduct: (product: Product) => void;
   onNewProduct: () => void;
   onResetSeed: () => Promise<void>;
+  onOpenAccount: () => void;
 }
 
 export function HistoryCatalogScreen({
   products,
   logs,
+  syncMode,
+  canEditPrices,
   onOpenProduct,
   onNewProduct,
   onResetSeed,
+  onOpenAccount,
 }: HistoryCatalogScreenProps) {
   const [tab, setTab] = useState<'catalog' | 'logs'>('catalog');
   const [query, setQuery] = useState('');
@@ -90,7 +97,9 @@ export function HistoryCatalogScreen({
               }`}
             >
               <Package className="w-4 h-4 text-[#2563eb]" />
-              <span>Catálogo Local ({products.length})</span>
+              <span>
+                {syncMode === 'cloud' ? 'Catálogo Nuvem' : 'Catálogo Local'} ({products.length})
+              </span>
             </button>
             <button
               type="button"
@@ -118,11 +127,15 @@ export function HistoryCatalogScreen({
 
             <button
               type="button"
-              onClick={onNewProduct}
-              className="h-10 px-4 rounded-xl bg-[#007b71] hover:bg-[#006058] text-white text-xs font-bold flex items-center gap-1.5 whitespace-nowrap"
+              onClick={() => (canEditPrices ? onNewProduct() : onOpenAccount())}
+              className={`h-10 px-4 rounded-xl text-white text-xs font-bold flex items-center gap-1.5 whitespace-nowrap ${
+                canEditPrices
+                  ? 'bg-[#007b71] hover:bg-[#006058]'
+                  : 'bg-[#434655] hover:bg-[#313444]'
+              }`}
             >
-              <Plus className="w-4 h-4" />
-              <span>Novo Produto</span>
+              {canEditPrices ? <Plus className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
+              <span>{canEditPrices ? 'Novo Produto' : 'Novo (Gerente)'}</span>
             </button>
           </div>
         </div>
@@ -244,6 +257,12 @@ export function HistoryCatalogScreen({
                           <span className="font-semibold text-[#004ac6]">
                             {actionLabel}
                           </span>
+                          {log.operator ? (
+                            <>
+                              {' · '}
+                              <span className="font-mono">{log.operator}</span>
+                            </>
+                          ) : null}
                           {' · '}
                           <span>{formatRelativeTime(log.timestamp)}</span>
                         </p>
@@ -259,39 +278,41 @@ export function HistoryCatalogScreen({
           </div>
         )}
 
-        {/* Footer Utility: Reset Seed Data */}
-        <div className="flex justify-end pt-1">
-          {!confirmReset ? (
-            <button
-              type="button"
-              onClick={() => setConfirmReset(true)}
-              className="text-xs font-semibold text-[#434655] hover:text-[#131b2e] flex items-center gap-1.5 py-2 px-3 rounded-lg"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Restaurar catálogo inicial</span>
-            </button>
-          ) : (
-            <div className="flex items-center gap-2">
+        {/* Footer Utility: Reset Seed Data (Offline local catalog only) */}
+        {syncMode === 'offline' && (
+          <div className="flex justify-end pt-1">
+            {!confirmReset ? (
               <button
                 type="button"
-                onClick={() => setConfirmReset(false)}
-                className="text-xs font-semibold text-[#434655] px-3 py-1.5 rounded-lg bg-[#eaedff]"
+                onClick={() => setConfirmReset(true)}
+                className="text-xs font-semibold text-[#434655] hover:text-[#131b2e] flex items-center gap-1.5 py-2 px-3 rounded-lg"
               >
-                Cancelar
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Restaurar catálogo inicial</span>
               </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  await onResetSeed();
-                  setConfirmReset(false);
-                }}
-                className="text-xs font-bold text-white px-3 py-1.5 rounded-lg bg-[#ba1a1a]"
-              >
-                Confirmar Restauração
-              </button>
-            </div>
-          )}
-        </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setConfirmReset(false)}
+                  className="text-xs font-semibold text-[#434655] px-3 py-1.5 rounded-lg bg-[#eaedff]"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await onResetSeed();
+                    setConfirmReset(false);
+                  }}
+                  className="text-xs font-bold text-white px-3 py-1.5 rounded-lg bg-[#ba1a1a]"
+                >
+                  Confirmar Restauração
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -1,0 +1,116 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Authenticated store account profile with role and store association.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "email": { "type": "string", "minLength": 3, "maxLength": 120 },
+        "role": { "type": "string", "enum": ["admin", "operator"] },
+        "storeId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "displayName", "email", "role", "storeId", "createdAt", "updatedAt"]
+    },
+    "Store": {
+      "title": "Store",
+      "description": "Retail store workspace root document.",
+      "type": "object",
+      "properties": {
+        "storeId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["storeId", "name", "ownerId", "createdAt", "updatedAt"]
+    },
+    "StoreOperator": {
+      "title": "StoreOperator",
+      "description": "Counter operator profile with quick PIN and role inside a store.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "storeId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "code": { "type": "string", "minLength": 1, "maxLength": 20 },
+        "role": { "type": "string", "enum": ["admin", "operator"] },
+        "pin": { "type": "string", "minLength": 4, "maxLength": 4, "pattern": "^[0-9]{4}$" },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "storeId", "ownerId", "name", "code", "role", "pin", "active", "createdAt", "updatedAt"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Retail catalog item indexed by barcode.",
+      "type": "object",
+      "properties": {
+        "barcode": { "type": "string", "minLength": 1, "maxLength": 32, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "storeId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "brand": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "category": { "type": "string", "enum": ["Mercearia", "Bebidas", "Limpeza", "Frios", "Padaria", "Outros"] },
+        "price": { "type": "number" },
+        "wholesalePrice": { "type": "number" },
+        "clubPrice": { "type": "number" },
+        "marginPercent": { "type": "number" },
+        "stock": { "type": "number" },
+        "location": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "weightLabel": { "type": "string", "minLength": 1, "maxLength": 24 },
+        "description": { "type": "string", "maxLength": 240 },
+        "operator": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "updatedBy": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["barcode", "storeId", "ownerId", "name", "brand", "category", "price", "wholesalePrice", "clubPrice", "marginPercent", "stock", "location", "weightLabel", "description", "operator", "updatedBy", "createdAt", "updatedAt"]
+    },
+    "ScanLog": {
+      "title": "ScanLog",
+      "description": "Immutable barcode scan and price update audit entry.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "storeId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "barcode": { "type": "string", "minLength": 1, "maxLength": 32, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "productName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "price": { "type": "number" },
+        "action": { "type": "string", "enum": ["consulta", "cadastro", "ajuste"] },
+        "operator": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "storeId", "ownerId", "barcode", "productName", "price", "action", "operator", "userId", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private user account profiles."
+    },
+    "/stores/{storeId}": {
+      "schema": { "$ref": "#/entities/Store" },
+      "description": "Store root documents."
+    },
+    "/stores/{storeId}/operators/{operatorId}": {
+      "schema": { "$ref": "#/entities/StoreOperator" },
+      "description": "Store counter operator profiles with PIN."
+    },
+    "/stores/{storeId}/products/{barcode}": {
+      "schema": { "$ref": "#/entities/Product" },
+      "description": "Store retail product catalog indexed by barcode."
+    },
+    "/stores/{storeId}/scanLogs/{logId}": {
+      "schema": { "$ref": "#/entities/ScanLog" },
+      "description": "Immutable barcode scan and price change logs."
+    }
+  }
+}
