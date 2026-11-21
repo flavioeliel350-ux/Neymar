@@ -8,9 +8,7 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "dist:win": "electron-builder --win --publish never",
-    "dist:linux": "electron-builder --linux --publish never",
-    "dist:mac": "electron-builder --mac --publish never"
+    "dist:win": "electron-builder --win --publish never"
   },
   "devDependencies": {
     "electron": "^45.4.1",
@@ -42,26 +40,14 @@
       ]
     },
     "nsis": {
+      "artifactName": "ProntoPreco-Instalador-Windows.exe",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
     },
-    "linux": {
-      "icon": "build/icon.png",
-      "category": "Office",
-      "target": [
-        "AppImage",
-        "deb"
-      ]
-    },
-    "mac": {
-      "icon": "build/icon.png",
-      "category": "public.app-category.business",
-      "target": [
-        "dmg",
-        "zip"
-      ]
+    "portable": {
+      "artifactName": "ProntoPreco-Portatil-Windows.exe"
     }
   }
 }

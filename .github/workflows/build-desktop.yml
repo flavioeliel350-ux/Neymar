@@ -1,4 +1,4 @@
-name: Compilar Desktop Windows e Linux (ProntoPreço)
+name: Compilar Windows .exe (ProntoPreço)
 
 on:
   push:
@@ -8,21 +8,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-desktop:
-    name: Build ProntoPreço Desktop (${{ matrix.label }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - label: Windows
-            os: windows-latest
-            artifact: ProntoPreco-Desktop-Windows
-            builder-flag: --win
-          - label: Linux
-            os: ubuntu-latest
-            artifact: ProntoPreco-Desktop-Linux
-            builder-flag: --linux
+  build-windows-exe:
+    name: Build ProntoPreço Windows (.exe)
+    runs-on: windows-latest
 
     steps:
       - name: Checkout do código
@@ -46,28 +34,18 @@ jobs:
         working-directory: desktop
         run: npm install
 
-      - name: Empacotar instalador e executável Desktop
+      - name: Compilar executáveis Windows (.exe)
         working-directory: desktop
-        run: npx electron-builder ${{ matrix.builder-flag }} --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: npx electron-builder --win --publish never
 
-      - name: Publicar executáveis Windows para download
-        if: matrix.label == 'Windows'
+      - name: Publicar arquivos .exe para download
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
+          name: ProntoPreco-Windows-EXE
           path: |
-            desktop/release/*.exe
-            desktop/release/*.blockmap
-          if-no-files-found: error
-          retention-days: 30
-
-      - name: Publicar executáveis Linux para download
-        if: matrix.label == 'Linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact }}
-          path: |
-            desktop/release/*.AppImage
-            desktop/release/*.deb
+            desktop/release/ProntoPreco-Instalador-Windows.exe
+            desktop/release/ProntoPreco-Portatil-Windows.exe
           if-no-files-found: error
           retention-days: 30

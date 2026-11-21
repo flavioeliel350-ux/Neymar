@@ -140,6 +140,10 @@ if (!gotSingleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
+    if (process.platform === 'win32') {
+      app.setAppUserModelId('com.prontopreco.desktop');
+    }
+
     session.defaultSession.setPermissionRequestHandler(
       (_webContents, permission, callback) => {
         if (permission === 'media') {
