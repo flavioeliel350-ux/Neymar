@@ -114,7 +114,11 @@ service cloud.firestore {
         && data.location is string && data.location.size() >= 1 && data.location.size() <= 80
         && data.weightLabel is string && data.weightLabel.size() >= 1 && data.weightLabel.size() <= 24
         && data.description is string && data.description.size() <= 240
-        && (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 500 && data.imageUrl.matches('^(|https://.*)$')))
+        && (!('imageUrl' in data) || (
+          data.imageUrl is string
+          && data.imageUrl.size() <= 80000
+          && data.imageUrl.matches('^(|https://.*|data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+)$')
+        ))
         && data.operator is string && data.operator.size() >= 1 && data.operator.size() <= 32
         && data.updatedBy is string && data.updatedBy == request.auth.uid
         && data.createdAt is timestamp

@@ -1,8 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Camera,
   CheckCircle2,
   CloudUpload,
+  ImagePlus,
   KeyRound,
+  Link2,
   Loader2,
   Lock,
   ScanBarcode,
@@ -16,6 +19,11 @@ import { CATEGORIES, Category, Product } from '../types/product';
 import { playBeep, triggerHaptic } from '../utils/feedback';
 import { lookupProductByBarcode } from '../services/barcodeLookupService';
 import { ProductVisual } from '../components/ProductVisual';
+import {
+  compressImageFileToDataUrl,
+  sanitizeProductImageUrl,
+  validateHttpsImageUrl,
+} from '../utils/imageHelper';
 
 interface ProductFormScreenProps {
   initialBarcode?: string;
@@ -95,12 +103,22 @@ export function ProductFormScreen({
 
   const nameInputRef = useRef<HTMLInputElement | null>(null);
   const priceInputRef = useRef<HTMLInputElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
 
   const nameDirtyRef = useRef(Boolean(existingProduct?.name));
   const brandDirtyRef = useRef(Boolean(existingProduct?.brand));
   const weightDirtyRef = useRef(Boolean(existingProduct?.weightLabel));
   const categoryDirtyRef = useRef(Boolean(existingProduct?.category));
+  const imageDirtyRef = useRef(Boolean(existingProduct?.imageUrl));
   const lastLookedUpRef = useRef<string>('');
+
+  const [showImageUrlInput, setShowImageUrlInput] = useState(false);
+  const [imageUrlDraft, setImageUrlDraft] = useState(
+    existingProduct?.imageUrl?.startsWith('https://') ? existingProduct.imageUrl : '',
+  );
+  const [imageProcessing, setImageProcessing] = useState(false);
+  const [imageError, setImageError] = useState<string | null>(null);
 
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -154,8 +172,14 @@ export function ProductFormScreen({
     if (!categoryDirtyRef.current && found.category) {
       setCategory(found.category);
     }
-    if (found.imageUrl) {
-      setImageUrl(found.imageUrl);
+    if (!imageDirtyRef.current && found.imageUrl) {
+      const sanitizedFoundImg = sanitizeProductImageUrl(found.imageUrl);
+      if (sanitizedFoundImg) {
+        setImageUrl(sanitizedFoundImg);
+        if (sanitizedFoundImg.startsWith('https://')) {
+          setImageUrlDraft(sanitizedFoundImg);
+        }
+      }
     }
 
     setLookupSource(found.source);
@@ -229,6 +253,51 @@ export function ProductFormScreen({
     triggerHaptic(20);
   };
 
+  const handleImageFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    setImageError(null);
+    setImageProcessing(true);
+    try {
+      const compressedDataUrl = await compressImageFileToDataUrl(file);
+      imageDirtyRef.current = true;
+      setImageUrl(compressedDataUrl);
+      setImageUrlDraft('');
+      setShowImageUrlInput(false);
+      triggerHaptic(20);
+    } catch (err) {
+      setImageError(
+        err instanceof Error ? err.message : 'Erro ao processar imagem selecionada.',
+      );
+    } finally {
+      setImageProcessing(false);
+    }
+  };
+
+  const handleApplyImageUrl = () => {
+    const valid = validateHttpsImageUrl(imageUrlDraft);
+    if (!valid) {
+      setImageError('Informe um link válido começando com https://');
+      return;
+    }
+    imageDirtyRef.current = true;
+    setImageUrl(valid);
+    setImageError(null);
+    setShowImageUrlInput(false);
+    triggerHaptic(20);
+  };
+
+  const handleRemoveImage = () => {
+    imageDirtyRef.current = true;
+    setImageUrl(undefined);
+    setImageUrlDraft('');
+    setImageError(null);
+    setShowImageUrlInput(false);
+    triggerHaptic(15);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
@@ -271,7 +340,7 @@ export function ProductFormScreen({
         location: location.trim() || 'Balcão',
         weightLabel: weightLabel.trim() || 'un',
         description: description.trim(),
-        imageUrl,
+        imageUrl: sanitizeProductImageUrl(imageUrl) || undefined,
         operator: operatorCode || 'Op. 01',
       });
       playBeep('save');
@@ -554,6 +623,125 @@ export function ProductFormScreen({
                 Arredondar ,99
               </button>
             </div>
+          </div>
+
+          {/* Field 3.5: Product Image Editor */}
+          <div className="bg-white rounded-2xl p-4 border border-[#e2e7ff] flex flex-col gap-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-[#131b2e]">
+                Imagem do Produto (Opcional)
+              </span>
+              {imageUrl && (
+                <button
+                  type="button"
+                  onClick={handleRemoveImage}
+                  className="text-xs font-bold text-[#ba1a1a] hover:bg-[#ffdad6] px-2.5 py-1 rounded-lg flex items-center gap-1 transition-colors cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Remover</span>
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-3.5">
+              <ProductVisual
+                category={category}
+                imageUrl={imageUrl}
+                alt={name || 'Produto'}
+                size="lg"
+              />
+
+              <div className="flex-1 min-w-0 flex flex-col gap-2">
+                <p className="text-xs text-[#434655]">
+                  {imageUrl
+                    ? 'Imagem configurada. Você pode trocar por foto da galeria, câmera ou link HTTPS.'
+                    : 'Sem imagem definida (usando ícone da categoria). Envie uma foto ou cole um link.'}
+                </p>
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={imageProcessing}
+                    onClick={() => fileInputRef.current?.click()}
+                    className="h-9 px-3 rounded-lg bg-[#eaedff] hover:bg-[#dae2fd] disabled:opacity-60 text-[#004ac6] text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    {imageProcessing ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <ImagePlus className="w-3.5 h-3.5" />
+                    )}
+                    <span>{imageProcessing ? 'Processando...' : 'Galeria / Arquivo'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={imageProcessing}
+                    onClick={() => cameraInputRef.current?.click()}
+                    className="h-9 px-3 rounded-lg bg-[#eaedff] hover:bg-[#dae2fd] disabled:opacity-60 text-[#004ac6] text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <Camera className="w-3.5 h-3.5" />
+                    <span>Tirar Foto</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={imageProcessing}
+                    onClick={() => {
+                      setImageError(null);
+                      setShowImageUrlInput((prev) => !prev);
+                    }}
+                    className="h-9 px-3 rounded-lg bg-[#f2f3ff] hover:bg-[#eaedff] text-[#434655] text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <Link2 className="w-3.5 h-3.5" />
+                    <span>Link HTTPS</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handleImageFileChange}
+              className="hidden"
+            />
+            <input
+              ref={cameraInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={handleImageFileChange}
+              className="hidden"
+            />
+
+            {showImageUrlInput && (
+              <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                <input
+                  type="url"
+                  value={imageUrlDraft}
+                  onChange={(e) => {
+                    setImageError(null);
+                    setImageUrlDraft(e.target.value);
+                  }}
+                  placeholder="https://exemplo.com/imagem-produto.jpg"
+                  className="flex-1 h-10 px-3 rounded-xl bg-[#f8fafc] border border-[#cbd5e1] focus:border-[#2563eb] text-xs font-medium text-[#131b2e] outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={handleApplyImageUrl}
+                  className="h-10 px-4 rounded-xl bg-[#004ac6] hover:bg-[#003ea8] text-white text-xs font-bold shrink-0 cursor-pointer"
+                >
+                  Aplicar Link
+                </button>
+              </div>
+            )}
+
+            {imageError && (
+              <p role="alert" className="text-xs font-bold text-[#ba1a1a]">
+                {imageError}
+              </p>
+            )}
           </div>
 
           {/* Field 4: Category Selector */}

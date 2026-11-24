@@ -34,6 +34,7 @@ import {
   hashPin,
   isValidPinFormat,
 } from '../utils/pinSecurity';
+import { sanitizeProductImageUrl } from '../utils/imageHelper';
 
 function sanitizeId(raw: string): string {
   const cleaned = raw.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -53,12 +54,6 @@ function clampCategory(cat: string): Category {
 function clampNum(val: number | undefined, min: number, max: number, fallback: number): number {
   const n = typeof val === 'number' && Number.isFinite(val) ? val : fallback;
   return Math.min(max, Math.max(min, Number(n.toFixed(2))));
-}
-
-function sanitizeImageUrl(url: string | undefined): string {
-  const trimmed = (url || '').trim();
-  if (!trimmed.startsWith('https://')) return '';
-  return trimmed.slice(0, 500);
 }
 
 function timestampToIso(ts: unknown): string {
@@ -328,7 +323,7 @@ export async function saveProductToFirestore(
     location: clampStr(product.location, 80, 'Balcão'),
     weightLabel: clampStr(product.weightLabel, 24, 'un'),
     description: (product.description || '').trim().slice(0, 240),
-    imageUrl: sanitizeImageUrl(product.imageUrl),
+    imageUrl: sanitizeProductImageUrl(product.imageUrl),
     operator: clampStr(product.operator, 32, 'Op. 01'),
     updatedBy: uid,
     updatedAt: serverTimestamp(),
@@ -546,7 +541,7 @@ export async function syncLocalProductsToCloud(
         location: clampStr(item.location, 80, 'Balcão'),
         weightLabel: clampStr(item.weightLabel, 24, 'un'),
         description: (item.description || '').trim().slice(0, 240),
-        imageUrl: sanitizeImageUrl(item.imageUrl),
+        imageUrl: sanitizeProductImageUrl(item.imageUrl),
         operator: clampStr(item.operator, 32, 'Op. 01'),
         updatedBy: uid,
         createdAt: serverTimestamp(),

@@ -4,7 +4,7 @@
 1. A `UserProfile` at `/users/{userId}` can only be read, created, or updated by the matching verified user (`request.auth.uid == userId`), with `storeId == userId` immutable and self-escalation of `role` forbidden.
 2. A `Store` at `/stores/{storeId}` is strictly isolated per tenant (`storeId == request.auth.uid` and `ownerId == request.auth.uid`); `ownerId`, `storeId`, and `createdAt` are immutable.
 3. A `StoreOperator` at `/stores/{storeId}/operators/{operatorId}` must belong to an existing parent `Store` owned by `request.auth.uid` (`storeId == request.auth.uid`), store a validated hashed PIN (`pinHash`), and carry explicit role (`manager` or `operator`) and permission flags.
-4. A `Product` at `/stores/{storeId}/products/{barcode}` must belong to an existing parent `Store` owned by `request.auth.uid` (`storeId == request.auth.uid`), enforce `price > 0`, bounded strings, valid categories, optional `https://` `imageUrl` (<= 500 chars), and server-side timestamps (`request.time`).
+4. A `Product` at `/stores/{storeId}/products/{barcode}` must belong to an existing parent `Store` owned by `request.auth.uid` (`storeId == request.auth.uid`), enforce `price > 0`, bounded strings, valid categories, optional `https://` or strictly bounded (`<= 80000` chars) `data:image/(jpeg|png|webp);base64,...` `imageUrl`, and server-side timestamps (`request.time`).
 5. A `ScanLog` at `/stores/{storeId}/scans/{logId}` is append-only (`update` and `delete` denied), strictly isolated to `storeId == request.auth.uid`, tied to `request.auth.uid` and `request.time`.
 6. Every `allow list` rule evaluates `resource.data` directly against `request.auth.uid` without `get()` or `exists()` lookups.
 
