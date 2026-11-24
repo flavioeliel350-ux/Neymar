@@ -24,6 +24,7 @@ interface HomeScreenProps {
   storeName?: string;
   activeOperator?: StoreOperator | null;
   canEditPrices: boolean;
+  canConsultPrices: boolean;
   onStartScan: (mode: ScannerMode) => void;
   onOpenProduct: (product: Product) => void;
   onRegisterBarcode: (barcode: string) => void;
@@ -39,6 +40,7 @@ export function HomeScreen({
   storeName,
   activeOperator,
   canEditPrices,
+  canConsultPrices,
   onStartScan,
   onOpenProduct,
   onRegisterBarcode,
@@ -110,7 +112,7 @@ export function HomeScreen({
               <div className="min-w-0">
                 <p className="text-[11px] font-bold uppercase tracking-wider text-[#004ac6]">
                   {activeOperator
-                    ? `${activeOperator.code} · ${activeOperator.role === 'admin' ? 'Perfil Gerente' : 'Perfil Operador'}`
+                    ? `${activeOperator.code} · ${activeOperator.role === 'manager' ? 'Perfil Gerente' : 'Perfil Operador'}`
                     : 'Terminal Ativo'}
                 </p>
                 <h1 className="text-xl md:text-2xl font-extrabold text-[#131b2e] tracking-tight mt-0.5 truncate">
@@ -152,16 +154,28 @@ export function HomeScreen({
               type="button"
               onClick={() => {
                 triggerHaptic(35);
-                onStartScan('query');
+                if (canConsultPrices) {
+                  onStartScan('query');
+                } else {
+                  onOpenAccount();
+                }
               }}
-              className="group relative flex flex-col justify-between text-left bg-[#2563eb] hover:bg-[#004ac6] active:scale-[0.99] active:brightness-95 transition-all duration-150 rounded-2xl p-5 text-white min-h-[144px] shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#004ac6] focus-visible:ring-offset-2"
+              className={`group relative flex flex-col justify-between text-left active:scale-[0.99] active:brightness-95 transition-all duration-150 rounded-2xl p-5 text-white min-h-[144px] shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#004ac6] focus-visible:ring-offset-2 ${
+                canConsultPrices
+                  ? 'bg-[#2563eb] hover:bg-[#004ac6]'
+                  : 'bg-[#434655] hover:bg-[#313444]'
+              }`}
             >
               <div className="flex items-start justify-between w-full">
                 <div className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center shrink-0">
-                  <QrCode className="w-7 h-7 text-white" />
+                  {canConsultPrices ? (
+                    <QrCode className="w-7 h-7 text-white" />
+                  ) : (
+                    <Lock className="w-6 h-6 text-white" />
+                  )}
                 </div>
                 <span className="text-[11px] font-semibold text-white/90 whitespace-nowrap">
-                  Modo Consulta · Rápido
+                  {canConsultPrices ? 'Modo Consulta · Rápido' : 'Sem permissão de consulta'}
                 </span>
               </div>
 
@@ -173,7 +187,9 @@ export function HomeScreen({
                   <ArrowRight className="w-6 h-6 shrink-0 group-hover:translate-x-1 transition-transform" />
                 </div>
                 <p className="text-xs md:text-sm text-[#dbe1ff] mt-1">
-                  Bipar código de barras para conferir valor na hora
+                  {canConsultPrices
+                    ? 'Bipar código de barras para conferir valor na hora'
+                    : 'Troque para um perfil autorizado com PIN para consultar preços'}
                 </p>
               </div>
             </button>

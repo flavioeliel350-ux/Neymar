@@ -26,6 +26,7 @@ interface ProductDetailsScreenProps {
   product: Product;
   syncMode: 'cloud' | 'local';
   canEditPrices: boolean;
+  canAdjustStock: boolean;
   onScanNext: () => void;
   onEdit: (product: Product) => void;
   onAdjustStock: (barcode: string, delta: number) => void;
@@ -36,6 +37,7 @@ export function ProductDetailsScreen({
   product,
   syncMode,
   canEditPrices,
+  canAdjustStock,
   onScanNext,
   onEdit,
   onAdjustStock,
@@ -108,30 +110,39 @@ export function ProductDetailsScreen({
                     </span>
                   </div>
                 </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  <button
-                    type="button"
-                    aria-label="Diminuir estoque"
-                    onClick={() => {
-                      triggerHaptic(20);
-                      onAdjustStock(product.barcode, -1);
-                    }}
-                    className="w-7 h-7 rounded-lg bg-white border border-[#cbd5e1] flex items-center justify-center text-[#131b2e] hover:bg-[#eaedff] active:scale-95"
+                {canAdjustStock ? (
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      aria-label="Diminuir estoque"
+                      onClick={() => {
+                        triggerHaptic(20);
+                        onAdjustStock(product.barcode, -1);
+                      }}
+                      className="w-7 h-7 rounded-lg bg-white border border-[#cbd5e1] flex items-center justify-center text-[#131b2e] hover:bg-[#eaedff] active:scale-95 cursor-pointer"
+                    >
+                      <Minus className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Aumentar estoque"
+                      onClick={() => {
+                        triggerHaptic(20);
+                        onAdjustStock(product.barcode, 1);
+                      }}
+                      className="w-7 h-7 rounded-lg bg-white border border-[#cbd5e1] flex items-center justify-center text-[#131b2e] hover:bg-[#eaedff] active:scale-95 cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <span
+                    title="Operador sem permissão de ajuste de estoque"
+                    className="w-7 h-7 rounded-lg bg-white/70 border border-[#cbd5e1] flex items-center justify-center text-[#737686] shrink-0"
                   >
-                    <Minus className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    aria-label="Aumentar estoque"
-                    onClick={() => {
-                      triggerHaptic(20);
-                      onAdjustStock(product.barcode, 1);
-                    }}
-                    className="w-7 h-7 rounded-lg bg-white border border-[#cbd5e1] flex items-center justify-center text-[#131b2e] hover:bg-[#eaedff] active:scale-95"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                  </button>
-                </div>
+                    <Lock className="w-3.5 h-3.5" />
+                  </span>
+                )}
               </div>
 
               <div className="flex items-center gap-2 p-3 rounded-xl bg-[#f2f3ff]">

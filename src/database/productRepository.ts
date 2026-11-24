@@ -1,4 +1,16 @@
-import { LocalAccount, Product, ScanLog, StoreOperator } from '../types/product';
+import {
+  LocalAccount,
+  Product,
+  SaveOperatorInput,
+  ScanLog,
+  StoreOperator,
+  UserRole,
+} from '../types/product';
+import {
+  DEFAULT_MANAGER_PIN,
+  hashPin,
+  isValidPinFormat,
+} from '../utils/pinSecurity';
 
 const DB_NAME = 'prontopreco_offline_db';
 const DB_VERSION = 2;
@@ -77,6 +89,30 @@ function writeLocalStorage<T>(key: string, data: T): void {
   }
 }
 
+function normalizeRole(raw: unknown): UserRole {
+  return raw === 'manager' || raw === 'admin' ? 'manager' : 'operator';
+}
+
+function normalizeOperator(
+  accountId: string,
+  op: Partial<StoreOperator> & { id: string },
+): StoreOperator {
+  const role = normalizeRole(op.role);
+  return {
+    id: op.id,
+    storeId: op.storeId || accountId,
+    ownerId: op.ownerId || accountId,
+    name: op.name || (role === 'manager' ? 'Gerente' : 'Operador'),
+    code: op.code || 'Op. 01',
+    role,
+    pinHash: op.pinHash,
+    pin: op.pinHash ? undefined : op.pin,
+    canConsultPrices: role === 'manager' ? true : op.canConsultPrices !== false,
+    canAdjustStock: role === 'manager' ? true : op.canAdjustStock !== false,
+    active: op.active !== false,
+  };
+}
+
 export async function initDatabase(): Promise<void> {
   try {
     LEGACY_LS_KEYS.forEach((k) => localStorage.removeItem(k));
@@ -89,7 +125,13 @@ export async function initDatabase(): Promise<void> {
 // --- Multi-Tenant Local Store Accounts ---
 
 export function getLocalAccounts(): LocalAccount[] {
-  return readLocalStorage<LocalAccount[]>(LS_ACCOUNTS_KEY, []);
+  const raw = readLocalStorage<LocalAccount[]>(LS_ACCOUNTS_KEY, []);
+  return raw.map((acc) => ({
+    ...acc,
+    operators: Array.isArray(acc.operators)
+      ? acc.operators.map((op) => normalizeOperator(acc.id, op))
+      : [],
+  }));
 }
 
 export function getActiveLocalAccountId(): string | null {
@@ -112,16 +154,18 @@ export function setActiveLocalAccountId(accountId: string | null): void {
   }
 }
 
-export function createLocalAccount(
+export async function createLocalAccount(
   storeName: string,
   managerName = 'Gerente',
-  managerPin = '1234',
-): LocalAccount {
+  managerPin = DEFAULT_MANAGER_PIN,
+): Promise<LocalAccount> {
   const id = `local_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
   const cleanStoreName = storeName.trim().slice(0, 100) || 'Minha Loja Local';
   const cleanManager = managerName.trim().slice(0, 60) || 'Gerente';
-  const cleanPin = /^\d{4}$/.test(managerPin.trim()) ? managerPin.trim() : '1234';
+  const cleanPin = isValidPinFormat(managerPin) ? managerPin.trim() : DEFAULT_MANAGER_PIN;
+  const pinHash = await hashPin(id, 'op-01', cleanPin);
 
+  // Only the Store Creator (Gerente) is provisioned; no dummy/fictitious operators
   const account: LocalAccount = {
     id,
     storeName: cleanStoreName,
@@ -133,18 +177,10 @@ export function createLocalAccount(
         ownerId: id,
         name: cleanManager,
         code: 'Op. 01',
-        role: 'admin',
-        pin: cleanPin,
-        active: true,
-      },
-      {
-        id: 'op-02',
-        storeId: id,
-        ownerId: id,
-        name: 'Operador Balcão',
-        code: 'Op. 02',
-        role: 'operator',
-        pin: '0000',
+        role: 'manager',
+        pinHash,
+        canConsultPrices: true,
+        canAdjustStock: true,
         active: true,
       },
     ],
@@ -172,29 +208,53 @@ export function updateLocalAccountStoreName(
   return accounts[idx];
 }
 
-export function saveLocalAccountOperator(
+export async function saveLocalAccountOperator(
   accountId: string,
-  op: Omit<StoreOperator, 'storeId' | 'ownerId'>,
-): StoreOperator[] {
+  op: SaveOperatorInput,
+): Promise<StoreOperator[]> {
   const accounts = getLocalAccounts();
   const idx = accounts.findIndex((a) => a.id === accountId);
   if (idx < 0) return [];
 
+  const existingOps = [...accounts[idx].operators];
+  const existing = existingOps.find((o) => o.id === op.id);
+
+  let pinHash = op.existingPinHash ?? existing?.pinHash;
+  let legacyPin = op.existingLegacyPin ?? existing?.pin;
+
+  if (op.newPin && isValidPinFormat(op.newPin)) {
+    pinHash = await hashPin(accountId, op.id, op.newPin);
+    legacyPin = undefined;
+  } else if (!pinHash && !legacyPin) {
+    pinHash = await hashPin(accountId, op.id, DEFAULT_MANAGER_PIN);
+  }
+
+  const role: UserRole = op.role === 'manager' ? 'manager' : 'operator';
+
   const nextOp: StoreOperator = {
-    ...op,
+    id: op.id,
     storeId: accountId,
     ownerId: accountId,
-    pin: /^\d{4}$/.test(op.pin) ? op.pin : '0000',
+    name: op.name.trim().slice(0, 60) || 'Operador',
+    code: op.code.trim().slice(0, 20) || 'Op.',
+    role,
+    ...(pinHash ? { pinHash } : {}),
+    ...(!pinHash && legacyPin ? { pin: legacyPin } : {}),
+    canConsultPrices: role === 'manager' ? true : Boolean(op.canConsultPrices),
+    canAdjustStock: role === 'manager' ? true : Boolean(op.canAdjustStock),
+    active: Boolean(op.active),
   };
 
-  const existingOps = [...accounts[idx].operators];
   const opIdx = existingOps.findIndex((o) => o.id === nextOp.id);
   if (opIdx >= 0) {
     existingOps[opIdx] = nextOp;
   } else {
     existingOps.push(nextOp);
   }
-  existingOps.sort((a, b) => a.code.localeCompare(b.code));
+  existingOps.sort((a, b) => {
+    if (a.role !== b.role) return a.role === 'manager' ? -1 : 1;
+    return a.code.localeCompare(b.code);
+  });
   accounts[idx] = { ...accounts[idx], operators: existingOps };
   writeLocalStorage(LS_ACCOUNTS_KEY, accounts);
   return existingOps;
@@ -204,6 +264,7 @@ export function deleteLocalAccountOperator(
   accountId: string,
   operatorId: string,
 ): StoreOperator[] {
+  if (operatorId === 'op-01') return getLocalAccounts().find((a) => a.id === accountId)?.operators || [];
   const accounts = getLocalAccounts();
   const idx = accounts.findIndex((a) => a.id === accountId);
   if (idx < 0) return [];

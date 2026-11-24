@@ -30,7 +30,7 @@
     },
     "StoreOperator": {
       "title": "StoreOperator",
-      "description": "Counter operator profile with quick PIN and role inside a store.",
+      "description": "Counter profile (Gerente or Operador) with hashed 4-6 digit PIN and granular permissions.",
       "type": "object",
       "properties": {
         "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
@@ -38,13 +38,15 @@
         "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "name": { "type": "string", "minLength": 1, "maxLength": 60 },
         "code": { "type": "string", "minLength": 1, "maxLength": 20 },
-        "role": { "type": "string", "enum": ["admin", "operator"] },
-        "pin": { "type": "string", "minLength": 4, "maxLength": 4, "pattern": "^[0-9]{4}$" },
+        "role": { "type": "string", "enum": ["manager", "admin", "operator"] },
+        "pinHash": { "type": "string", "minLength": 10, "maxLength": 128 },
+        "canConsultPrices": { "type": "boolean" },
+        "canAdjustStock": { "type": "boolean" },
         "active": { "type": "boolean" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["id", "storeId", "ownerId", "name", "code", "role", "pin", "active", "createdAt", "updatedAt"]
+      "required": ["id", "storeId", "ownerId", "name", "code", "role", "pinHash", "canConsultPrices", "canAdjustStock", "active", "createdAt", "updatedAt"]
     },
     "Product": {
       "title": "Product",

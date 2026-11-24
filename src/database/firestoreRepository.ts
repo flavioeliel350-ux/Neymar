@@ -2,6 +2,7 @@ import { User } from 'firebase/auth';
 import {
   collection,
   deleteDoc,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -21,11 +22,18 @@ import {
   CATEGORIES,
   Category,
   Product,
+  SaveOperatorInput,
   ScanLog,
   StoreInfo,
   StoreOperator,
   UserProfile,
+  UserRole,
 } from '../types/product';
+import {
+  DEFAULT_MANAGER_PIN,
+  hashPin,
+  isValidPinFormat,
+} from '../utils/pinSecurity';
 
 function sanitizeId(raw: string): string {
   const cleaned = raw.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -63,9 +71,14 @@ function timestampToIso(ts: unknown): string {
   return new Date().toISOString();
 }
 
+function normalizeRole(raw: unknown): UserRole {
+  return raw === 'manager' || raw === 'admin' ? 'manager' : 'operator';
+}
+
 export async function ensureUserAndStore(user: User): Promise<{
   profile: UserProfile;
   store: StoreInfo;
+  isNewStore: boolean;
 }> {
   const userPath = `users/${user.uid}`;
   let profile: UserProfile;
@@ -78,11 +91,11 @@ export async function ensureUserAndStore(user: User): Promise<{
         uid: d.uid,
         displayName: d.displayName,
         email: d.email,
-        role: d.role === 'admin' ? 'admin' : 'operator',
+        role: normalizeRole(d.role),
         storeId: d.storeId,
       };
     } else {
-      const displayName = clampStr(user.displayName || user.email?.split('@')[0], 80, 'Operador');
+      const displayName = clampStr(user.displayName || user.email?.split('@')[0], 80, 'Gerente');
       const email = clampStr(user.email || 'usuario@loja.local', 120, 'usuario@loja.local');
       const storeId = user.uid;
 
@@ -100,7 +113,7 @@ export async function ensureUserAndStore(user: User): Promise<{
         uid: user.uid,
         displayName,
         email,
-        role: 'operator',
+        role: 'manager',
         storeId,
       };
     }
@@ -110,6 +123,7 @@ export async function ensureUserAndStore(user: User): Promise<{
 
   const storePath = `stores/${profile.storeId}`;
   let store: StoreInfo;
+  let isNewStore = false;
 
   try {
     const storeRef = doc(db, 'stores', profile.storeId);
@@ -122,6 +136,7 @@ export async function ensureUserAndStore(user: User): Promise<{
         ownerId: sd.ownerId,
       };
     } else {
+      isNewStore = true;
       const defaultStoreName = clampStr(
         user.displayName ? `Loja ${user.displayName}` : 'Minha Loja ProntoPreço',
         100,
@@ -144,50 +159,35 @@ export async function ensureUserAndStore(user: User): Promise<{
     handleFirestoreError(err, OperationType.WRITE, storePath);
   }
 
-  // Ensure default counter operators (Gerente + Operador Balcão) exist, with zero seed products
+  // Provision ONLY the store creator's Gerente profile (op-01) if none exist yet; zero dummy operators
   const opsPath = `stores/${store.storeId}/operators`;
   try {
     const opsSnap = await getDocs(
       query(collection(db, opsPath), where('ownerId', '==', user.uid), limit(1)),
     );
     if (opsSnap.empty) {
-      const batch = writeBatch(db);
       const op1Ref = doc(db, opsPath, 'op-01');
-      const op2Ref = doc(db, opsPath, 'op-02');
-
-      batch.set(op1Ref, {
+      const defaultPinHash = await hashPin(store.storeId, 'op-01', DEFAULT_MANAGER_PIN);
+      await setDoc(op1Ref, {
         id: 'op-01',
         storeId: store.storeId,
         ownerId: user.uid,
-        name: clampStr(user.displayName || 'Gerente Principal', 60, 'Gerente'),
+        name: clampStr(user.displayName || user.email?.split('@')[0] || 'Gerente Principal', 60, 'Gerente'),
         code: 'Op. 01',
-        role: 'admin',
-        pin: '1234',
+        role: 'manager',
+        pinHash: defaultPinHash,
+        canConsultPrices: true,
+        canAdjustStock: true,
         active: true,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-
-      batch.set(op2Ref, {
-        id: 'op-02',
-        storeId: store.storeId,
-        ownerId: user.uid,
-        name: 'Operador Balcão',
-        code: 'Op. 02',
-        role: 'operator',
-        pin: '0000',
-        active: true,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-
-      await batch.commit();
     }
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, opsPath);
   }
 
-  return { profile, store };
+  return { profile, store, isNewStore };
 }
 
 export function subscribeStoreProducts(
@@ -279,18 +279,25 @@ export function subscribeStoreOperators(
     (snapshot) => {
       const items: StoreOperator[] = snapshot.docs.map((d) => {
         const data = d.data();
+        const role = normalizeRole(data.role);
         return {
           id: data.id,
           storeId: data.storeId,
           ownerId: data.ownerId,
           name: data.name,
           code: data.code,
-          role: data.role === 'admin' ? 'admin' : 'operator',
-          pin: data.pin,
+          role,
+          pinHash: typeof data.pinHash === 'string' ? data.pinHash : undefined,
+          pin: typeof data.pin === 'string' ? data.pin : undefined,
+          canConsultPrices: role === 'manager' ? true : data.canConsultPrices !== false,
+          canAdjustStock: role === 'manager' ? true : data.canAdjustStock !== false,
           active: Boolean(data.active),
         };
       });
-      items.sort((a, b) => a.code.localeCompare(b.code));
+      items.sort((a, b) => {
+        if (a.role !== b.role) return a.role === 'manager' ? -1 : 1;
+        return a.code.localeCompare(b.code);
+      });
       onData(items);
     },
     (error) => {
@@ -427,18 +434,26 @@ export async function addScanLogToFirestore(
 export async function saveOperatorToFirestore(
   storeId: string,
   ownerId: string,
-  op: Omit<StoreOperator, 'storeId' | 'ownerId'>,
+  op: SaveOperatorInput,
 ): Promise<void> {
   const opId = sanitizeId(op.id);
   const path = `stores/${storeId}/operators/${opId}`;
   const ref = doc(db, 'stores', storeId, 'operators', opId);
-  const pinClean = /^\d{4}$/.test(op.pin) ? op.pin : '0000';
+  const role: UserRole = op.role === 'manager' ? 'manager' : 'operator';
 
-  const payload = {
-    name: clampStr(op.name, 60, 'Operador'),
+  let pinHash = op.existingPinHash;
+  if (op.newPin && isValidPinFormat(op.newPin)) {
+    pinHash = await hashPin(storeId, opId, op.newPin);
+  } else if (!pinHash && !op.existingLegacyPin) {
+    pinHash = await hashPin(storeId, opId, DEFAULT_MANAGER_PIN);
+  }
+
+  const basePayload = {
+    name: clampStr(op.name, 60, role === 'manager' ? 'Gerente' : 'Operador'),
     code: clampStr(op.code, 20, 'Op.'),
-    role: op.role === 'admin' ? 'admin' : 'operator',
-    pin: pinClean,
+    role,
+    canConsultPrices: role === 'manager' ? true : Boolean(op.canConsultPrices),
+    canAdjustStock: role === 'manager' ? true : Boolean(op.canAdjustStock),
     active: Boolean(op.active),
     updatedAt: serverTimestamp(),
   };
@@ -446,13 +461,25 @@ export async function saveOperatorToFirestore(
   try {
     const existingSnap = await getDoc(ref);
     if (existingSnap.exists()) {
-      await updateDoc(ref, payload);
+      const updatePayload: Record<string, unknown> = {
+        ...basePayload,
+      };
+      if (pinHash) {
+        updatePayload.pinHash = pinHash;
+        if (existingSnap.data()?.pin !== undefined) {
+          updatePayload.pin = deleteField();
+        }
+      } else if (op.existingLegacyPin) {
+        updatePayload.pin = op.existingLegacyPin;
+      }
+      await updateDoc(ref, updatePayload);
     } else {
       await setDoc(ref, {
         id: opId,
         storeId,
         ownerId,
-        ...payload,
+        ...basePayload,
+        ...(pinHash ? { pinHash } : { pin: op.existingLegacyPin || DEFAULT_MANAGER_PIN }),
         createdAt: serverTimestamp(),
       });
     }
@@ -465,6 +492,7 @@ export async function deleteOperatorInFirestore(
   storeId: string,
   operatorId: string,
 ): Promise<void> {
+  if (operatorId === 'op-01') return;
   const opId = sanitizeId(operatorId);
   const path = `stores/${storeId}/operators/${opId}`;
   try {

@@ -9,7 +9,7 @@ export const CATEGORIES: Category[] = [
   'Outros',
 ];
 
-export type UserRole = 'admin' | 'operator';
+export type UserRole = 'manager' | 'operator';
 
 export interface Product {
   barcode: string;
@@ -60,7 +60,23 @@ export interface StoreOperator {
   name: string;
   code: string;
   role: UserRole;
-  pin: string;
+  pinHash?: string;
+  pin?: string;
+  canConsultPrices: boolean;
+  canAdjustStock: boolean;
+  active: boolean;
+}
+
+export interface SaveOperatorInput {
+  id: string;
+  name: string;
+  code: string;
+  role: UserRole;
+  newPin?: string;
+  existingPinHash?: string;
+  existingLegacyPin?: string;
+  canConsultPrices: boolean;
+  canAdjustStock: boolean;
   active: boolean;
 }
 

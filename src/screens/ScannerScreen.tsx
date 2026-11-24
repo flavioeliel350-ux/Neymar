@@ -12,6 +12,7 @@ import {
   FlashlightOff,
   Focus,
   Keyboard,
+  Lock,
   PackageOpen,
   RefreshCw,
   ScanBarcode,
@@ -31,6 +32,7 @@ import { formatBRL, playBeep, triggerHaptic } from '../utils/feedback';
 interface ScannerScreenProps {
   mode: ScannerMode;
   products: Product[];
+  canEditPrices: boolean;
   findByBarcode: (barcode: string) => Product | null;
   onChangeMode: (mode: ScannerMode) => void;
   onScanResolved: (barcode: string, mode: ScannerMode) => void;
@@ -49,6 +51,7 @@ const RETAIL_FORMATS = [
 export function ScannerScreen({
   mode,
   products,
+  canEditPrices,
   findByBarcode,
   onChangeMode,
   onScanResolved,
@@ -383,7 +386,11 @@ export function ScannerScreen({
                         : 'text-white/80 hover:text-white'
                     }`}
                   >
-                    <Edit3 className="w-3.5 h-3.5" />
+                    {canEditPrices ? (
+                      <Edit3 className="w-3.5 h-3.5" />
+                    ) : (
+                      <Lock className="w-3.5 h-3.5" />
+                    )}
                     <span>Cadastro</span>
                   </button>
                 </div>
@@ -517,9 +524,10 @@ export function ScannerScreen({
                   <button
                     type="button"
                     onClick={() => onScanResolved(notFoundAlert, 'register')}
-                    className="px-3 py-2 rounded-lg bg-[#ba1a1a] text-white text-xs font-bold whitespace-nowrap shrink-0 hover:brightness-90 transition-all cursor-pointer"
+                    className="px-3 py-2 rounded-lg bg-[#ba1a1a] text-white text-xs font-bold whitespace-nowrap shrink-0 hover:brightness-90 transition-all cursor-pointer flex items-center gap-1.5"
                   >
-                    Cadastrar Agora
+                    {!canEditPrices && <Lock className="w-3.5 h-3.5" />}
+                    <span>{canEditPrices ? 'Cadastrar Agora' : 'Gerente (PIN)'}</span>
                   </button>
                 </div>
               )}

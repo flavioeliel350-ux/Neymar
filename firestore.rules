@@ -46,7 +46,7 @@ service cloud.firestore {
         && data.uid is string && isValidId(data.uid)
         && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80
         && data.email is string && data.email.size() >= 3 && data.email.size() <= 120
-        && data.role in ['admin', 'operator']
+        && data.role in ['manager', 'admin', 'operator']
         && data.storeId is string && isValidId(data.storeId)
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
@@ -63,15 +63,25 @@ service cloud.firestore {
     }
 
     function isValidOperator(data) {
-      return data.keys().hasAll(['id', 'storeId', 'ownerId', 'name', 'code', 'role', 'pin', 'active', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['id', 'storeId', 'ownerId', 'name', 'code', 'role', 'pin', 'active', 'createdAt', 'updatedAt'])
+      return data.keys().hasAll(['id', 'storeId', 'ownerId', 'name', 'code', 'role', 'active', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'id', 'storeId', 'ownerId', 'name', 'code', 'role',
+          'pin', 'pinHash', 'canConsultPrices', 'canAdjustStock',
+          'active', 'createdAt', 'updatedAt'
+        ])
         && data.id is string && isValidId(data.id)
         && data.storeId is string && isValidId(data.storeId)
         && data.ownerId is string && isValidId(data.ownerId)
         && data.name is string && data.name.size() >= 1 && data.name.size() <= 60
         && data.code is string && data.code.size() >= 1 && data.code.size() <= 20
-        && data.role in ['admin', 'operator']
-        && data.pin is string && data.pin.size() == 4 && data.pin.matches('^[0-9]{4}$')
+        && data.role in ['manager', 'admin', 'operator']
+        && (
+          ('pinHash' in data && data.pinHash is string && data.pinHash.size() >= 10 && data.pinHash.size() <= 128)
+          || ('pin' in data && data.pin is string && data.pin.size() >= 4 && data.pin.size() <= 6 && data.pin.matches('^[0-9]{4,6}$'))
+        )
+        && (!('pin' in data) || (data.pin is string && data.pin.size() >= 4 && data.pin.size() <= 6 && data.pin.matches('^[0-9]{4,6}$')))
+        && (!('canConsultPrices' in data) || data.canConsultPrices is bool)
+        && (!('canAdjustStock' in data) || data.canAdjustStock is bool)
         && data.active is bool
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
@@ -207,7 +217,10 @@ service cloud.firestore {
           && incoming().createdAt == existing().createdAt
           && incoming().updatedAt == request.time
           && isStoreOwner(storeId)
-          && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'code', 'role', 'pin', 'active', 'updatedAt']);
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'name', 'code', 'role', 'pin', 'pinHash',
+            'canConsultPrices', 'canAdjustStock', 'active', 'updatedAt'
+          ]);
         allow delete: if isValidId(storeId) && isValidId(operatorId) && isStoreOwner(storeId);
       }
 
