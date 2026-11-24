@@ -10,6 +10,7 @@ import {
 import { CATEGORIES, Category, Product, ScanLog } from '../types/product';
 import { formatBRL, formatRelativeTime } from '../utils/feedback';
 import { ProductVisual } from '../components/ProductVisual';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 
 interface HistoryCatalogScreenProps {
   products: Product[];
@@ -32,10 +33,11 @@ export function HistoryCatalogScreen({
 }: HistoryCatalogScreenProps) {
   const [tab, setTab] = useState<'catalog' | 'logs'>('catalog');
   const [query, setQuery] = useState('');
+  const debouncedQuery = useDebouncedValue(query, 130);
   const [selectedCategory, setSelectedCategory] = useState<'Todos' | Category>('Todos');
 
   const filteredProducts = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = debouncedQuery.trim().toLowerCase();
     return products.filter((p) => {
       const matchesCat =
         selectedCategory === 'Todos' || p.category === selectedCategory;
@@ -48,17 +50,17 @@ export function HistoryCatalogScreen({
         p.location.toLowerCase().includes(q)
       );
     });
-  }, [products, query, selectedCategory]);
+  }, [products, debouncedQuery, selectedCategory]);
 
   const filteredLogs = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = debouncedQuery.trim().toLowerCase();
     if (!q) return logs;
     return logs.filter(
       (l) =>
         l.productName.toLowerCase().includes(q) ||
         l.barcode.toLowerCase().includes(q),
     );
-  }, [logs, query]);
+  }, [logs, debouncedQuery]);
 
   const handleExportCsv = () => {
     const header = 'barcode,name,brand,category,price,stock,location,updatedAt\n';
@@ -204,7 +206,12 @@ export function HistoryCatalogScreen({
                     className="w-full flex items-center justify-between gap-3 p-3.5 hover:bg-[#f2f3ff]/70 active:bg-[#eaedff] text-left transition-colors min-h-[68px]"
                   >
                     <div className="flex items-center gap-3 min-w-0">
-                      <ProductVisual category={item.category} size="md" />
+                      <ProductVisual
+                        category={item.category}
+                        imageUrl={item.imageUrl}
+                        alt={item.name}
+                        size="md"
+                      />
                       <div className="min-w-0">
                         <p className="text-sm font-bold text-[#131b2e] truncate">
                           {item.name}

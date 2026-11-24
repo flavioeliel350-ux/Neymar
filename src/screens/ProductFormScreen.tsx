@@ -15,6 +15,7 @@ import {
 import { CATEGORIES, Category, Product } from '../types/product';
 import { playBeep, triggerHaptic } from '../utils/feedback';
 import { lookupProductByBarcode } from '../services/barcodeLookupService';
+import { ProductVisual } from '../components/ProductVisual';
 
 interface ProductFormScreenProps {
   initialBarcode?: string;
@@ -62,6 +63,9 @@ export function ProductFormScreen({
   );
   const [name, setName] = useState(existingProduct?.name || '');
   const [brand, setBrand] = useState(existingProduct?.brand || '');
+  const [imageUrl, setImageUrl] = useState<string | undefined>(
+    existingProduct?.imageUrl,
+  );
   const [priceStr, setPriceStr] = useState(
     existingProduct ? formatPriceInput(existingProduct.price) : '',
   );
@@ -89,6 +93,9 @@ export function ProductFormScreen({
   >('idle');
   const [lookupSource, setLookupSource] = useState<string | null>(null);
 
+  const nameInputRef = useRef<HTMLInputElement | null>(null);
+  const priceInputRef = useRef<HTMLInputElement | null>(null);
+
   const nameDirtyRef = useRef(Boolean(existingProduct?.name));
   const brandDirtyRef = useRef(Boolean(existingProduct?.brand));
   const weightDirtyRef = useRef(Boolean(existingProduct?.weightLabel));
@@ -99,6 +106,19 @@ export function ProductFormScreen({
   const [saving, setSaving] = useState(false);
   const [savedProduct, setSavedProduct] = useState<Product | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+
+  // Auto-focus name (or price if editing) for fast zero-friction registration
+  useEffect(() => {
+    if (!canEditPrices) return;
+    const timer = setTimeout(() => {
+      if (isEditing) {
+        priceInputRef.current?.focus();
+      } else if (initialBarcode) {
+        nameInputRef.current?.focus();
+      }
+    }, 80);
+    return () => clearTimeout(timer);
+  }, [canEditPrices, isEditing, initialBarcode]);
 
   const runBarcodeLookup = useCallback(async (rawCode: string, force = false) => {
     const clean = rawCode.trim().replace(/\s+/g, '');
@@ -114,11 +134,16 @@ export function ProductFormScreen({
 
     if (!found) {
       setLookupStatus('not_found');
+      if (!nameDirtyRef.current) {
+        nameInputRef.current?.focus();
+      }
       return;
     }
 
     if (!nameDirtyRef.current && found.name) {
       setName(found.name);
+      // Como o nome veio pronto, move foco para o preço para digitação imediata
+      priceInputRef.current?.focus();
     }
     if (!brandDirtyRef.current && found.brand) {
       setBrand(found.brand);
@@ -128,6 +153,9 @@ export function ProductFormScreen({
     }
     if (!categoryDirtyRef.current && found.category) {
       setCategory(found.category);
+    }
+    if (found.imageUrl) {
+      setImageUrl(found.imageUrl);
     }
 
     setLookupSource(found.source);
@@ -142,7 +170,7 @@ export function ProductFormScreen({
       return;
     }
 
-    const delay = clean === initialBarcode.trim() ? 50 : 550;
+    const delay = clean === initialBarcode.trim() ? 40 : 480;
     const timer = setTimeout(() => {
       void runBarcodeLookup(clean);
     }, delay);
@@ -169,7 +197,7 @@ export function ProductFormScreen({
             <button
               type="button"
               onClick={onOpenAccount}
-              className="flex-1 h-12 rounded-xl bg-[#2563eb] hover:bg-[#004ac6] text-white font-bold text-sm flex items-center justify-center gap-2"
+              className="flex-1 h-12 rounded-xl bg-[#2563eb] hover:bg-[#004ac6] text-white font-bold text-sm flex items-center justify-center gap-2 cursor-pointer"
             >
               <KeyRound className="w-4 h-4" />
               <span>Trocar para Gerente (PIN)</span>
@@ -177,7 +205,7 @@ export function ProductFormScreen({
             <button
               type="button"
               onClick={onCancel}
-              className="flex-1 h-12 rounded-xl bg-[#eaedff] hover:bg-[#dae2fd] text-[#131b2e] font-bold text-sm flex items-center justify-center"
+              className="flex-1 h-12 rounded-xl bg-[#eaedff] hover:bg-[#dae2fd] text-[#131b2e] font-bold text-sm flex items-center justify-center cursor-pointer"
             >
               Voltar
             </button>
@@ -214,12 +242,14 @@ export function ProductFormScreen({
     const cleanName = name.trim();
     if (!cleanName) {
       setErrorMsg('Informe o nome do produto.');
+      nameInputRef.current?.focus();
       return;
     }
 
     const numericPrice = parsePriceInput(priceStr);
     if (numericPrice <= 0) {
       setErrorMsg('Informe um preço de venda maior que zero.');
+      priceInputRef.current?.focus();
       return;
     }
 
@@ -241,6 +271,7 @@ export function ProductFormScreen({
         location: location.trim() || 'Balcão',
         weightLabel: weightLabel.trim() || 'un',
         description: description.trim(),
+        imageUrl,
         operator: operatorCode || 'Op. 01',
       });
       playBeep('save');
@@ -283,7 +314,7 @@ export function ProductFormScreen({
             <button
               type="button"
               onClick={onContinueScanning}
-              className="flex-1 h-12 rounded-xl bg-[#007b71] hover:bg-[#006058] text-white font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-all"
+              className="flex-1 h-12 rounded-xl bg-[#007b71] hover:bg-[#006058] text-white font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-all cursor-pointer"
             >
               <ScanBarcode className="w-4 h-4" />
               <span>Continuar Bipando</span>
@@ -291,7 +322,7 @@ export function ProductFormScreen({
             <button
               type="button"
               onClick={() => onViewProduct(savedProduct)}
-              className="flex-1 h-12 rounded-xl bg-[#eaedff] hover:bg-[#dae2fd] text-[#131b2e] font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-all"
+              className="flex-1 h-12 rounded-xl bg-[#eaedff] hover:bg-[#dae2fd] text-[#131b2e] font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-all cursor-pointer"
             >
               <span>Ver Detalhes</span>
             </button>
@@ -304,11 +335,20 @@ export function ProductFormScreen({
   return (
     <div className="w-full max-w-3xl mx-auto px-3 md:px-6 py-4 md:py-6 pb-12">
       <div className="flex flex-col gap-4">
-        {/* Status Notification Banner */}
-        <div className="flex items-start gap-3 p-3.5 bg-[#dcfce7]/60 border border-[#86efac] rounded-xl">
-          <div className="w-9 h-9 rounded-full bg-[#006e2d] text-white flex items-center justify-center shrink-0">
-            <ScanBarcode className="w-5 h-5" />
-          </div>
+        {/* Status Notification Banner with Product Preview */}
+        <div className="flex items-center gap-3 p-3.5 bg-[#dcfce7]/60 border border-[#86efac] rounded-xl">
+          {imageUrl ? (
+            <ProductVisual
+              category={category}
+              imageUrl={imageUrl}
+              alt={name || 'Produto'}
+              size="md"
+            />
+          ) : (
+            <div className="w-10 h-10 rounded-full bg-[#006e2d] text-white flex items-center justify-center shrink-0">
+              <ScanBarcode className="w-5 h-5" />
+            </div>
+          )}
           <div className="min-w-0">
             <p className="text-sm font-extrabold text-[#005320]">
               {isEditing
@@ -322,7 +362,7 @@ export function ProductFormScreen({
             <p className="text-xs text-[#434655] mt-0.5">
               {isEditing
                 ? 'Atualize o preço de venda, seção ou estoque para aplicar na hora.'
-                : 'Ao digitar ou bipar um código EAN novo, buscamos nome e marca automaticamente.'}
+                : 'Consultamos nome, marca e foto automaticamente — você pode editar ou preencher tudo manualmente.'}
             </p>
           </div>
         </div>
@@ -344,7 +384,7 @@ export function ProductFormScreen({
                 htmlFor="barcodeInput"
                 className="text-xs font-bold uppercase tracking-wider text-[#434655]"
               >
-                Código de Barras (EAN-13)
+                Código de Barras (EAN / GTIN)
               </label>
               {lockBarcode && (
                 <span className="text-[11px] font-bold text-[#006058] flex items-center gap-1">
@@ -382,7 +422,7 @@ export function ProductFormScreen({
                   type="button"
                   onClick={() => void runBarcodeLookup(barcode, true)}
                   disabled={lookupStatus === 'loading'}
-                  className="h-12 px-3.5 rounded-xl bg-[#eaedff] hover:bg-[#dae2fd] text-[#004ac6] text-xs font-bold flex items-center gap-1.5 shrink-0"
+                  className="h-12 px-3.5 rounded-xl bg-[#eaedff] hover:bg-[#dae2fd] text-[#004ac6] text-xs font-bold flex items-center gap-1.5 shrink-0 cursor-pointer"
                 >
                   {lookupStatus === 'loading' ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
@@ -400,7 +440,7 @@ export function ProductFormScreen({
                   <>
                     <Loader2 className="w-3.5 h-3.5 animate-spin text-[#004ac6]" />
                     <span className="text-[#434655] font-medium">
-                      Buscando informações públicas para este código...
+                      Buscando nome, marca e foto nas bases públicas...
                     </span>
                   </>
                 )}
@@ -408,13 +448,13 @@ export function ProductFormScreen({
                   <>
                     <Sparkles className="w-3.5 h-3.5 text-[#006e2d]" />
                     <span className="text-[#006e2d] font-bold">
-                      Nome preenchido automaticamente via {lookupSource}
+                      Dados preenchidos automaticamente via {lookupSource}
                     </span>
                   </>
                 )}
                 {lookupStatus === 'not_found' && (
                   <span className="text-[#434655]">
-                    Produto não encontrado na base pública. Preencha os dados manualmente.
+                    Produto não localizado na base pública (ou offline). Preencha manualmente abaixo sem perder o código.
                   </span>
                 )}
               </div>
@@ -431,6 +471,7 @@ export function ProductFormScreen({
             </label>
             <div className="relative flex items-center bg-white rounded-xl border border-[#cbd5e1] focus-within:border-[#2563eb] focus-within:ring-2 focus-within:ring-[#2563eb]/15">
               <input
+                ref={nameInputRef}
                 id="productName"
                 type="text"
                 required
@@ -449,8 +490,9 @@ export function ProductFormScreen({
                   onClick={() => {
                     nameDirtyRef.current = false;
                     setName('');
+                    nameInputRef.current?.focus();
                   }}
-                  className="absolute right-2 w-8 h-8 rounded-full flex items-center justify-center text-[#737686] hover:text-[#131b2e] hover:bg-[#eaedff]"
+                  className="absolute right-2 w-8 h-8 rounded-full flex items-center justify-center text-[#737686] hover:text-[#131b2e] hover:bg-[#eaedff] cursor-pointer"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -477,6 +519,7 @@ export function ProductFormScreen({
                 R$
               </span>
               <input
+                ref={priceInputRef}
                 id="priceInput"
                 type="text"
                 inputMode="decimal"
@@ -492,21 +535,21 @@ export function ProductFormScreen({
               <button
                 type="button"
                 onClick={() => adjustPrice(0.5)}
-                className="h-10 rounded-lg bg-[#eaedff] hover:bg-[#dae2fd] active:scale-95 text-[#131b2e] text-xs font-bold transition-all"
+                className="h-10 rounded-lg bg-[#eaedff] hover:bg-[#dae2fd] active:scale-95 text-[#131b2e] text-xs font-bold transition-all cursor-pointer"
               >
                 +R$ 0,50
               </button>
               <button
                 type="button"
                 onClick={() => adjustPrice(1.0)}
-                className="h-10 rounded-lg bg-[#eaedff] hover:bg-[#dae2fd] active:scale-95 text-[#131b2e] text-xs font-bold transition-all"
+                className="h-10 rounded-lg bg-[#eaedff] hover:bg-[#dae2fd] active:scale-95 text-[#131b2e] text-xs font-bold transition-all cursor-pointer"
               >
                 +R$ 1,00
               </button>
               <button
                 type="button"
                 onClick={roundToNinetyNine}
-                className="h-10 rounded-lg bg-[#dbe1ff] hover:bg-[#b4c5ff] active:scale-95 text-[#00174b] text-xs font-bold transition-all"
+                className="h-10 rounded-lg bg-[#dbe1ff] hover:bg-[#b4c5ff] active:scale-95 text-[#00174b] text-xs font-bold transition-all cursor-pointer"
               >
                 Arredondar ,99
               </button>
@@ -529,7 +572,7 @@ export function ProductFormScreen({
                       categoryDirtyRef.current = true;
                       setCategory(cat);
                     }}
-                    className={`px-3.5 py-2 rounded-full text-xs font-bold transition-all min-h-[38px] ${
+                    className={`px-3.5 py-2 rounded-full text-xs font-bold transition-all min-h-[38px] cursor-pointer ${
                       active
                         ? 'bg-[#004ac6] text-white shadow-sm'
                         : 'bg-[#eaedff] text-[#434655] hover:bg-[#dae2fd]'
@@ -663,7 +706,7 @@ export function ProductFormScreen({
             <button
               type="submit"
               disabled={saving}
-              className="w-full h-14 bg-[#006e2d] hover:bg-[#005320] disabled:opacity-60 text-white rounded-xl font-extrabold text-sm md:text-base uppercase tracking-wide flex items-center justify-center gap-2 shadow-sm active:scale-[0.99] transition-all"
+              className="w-full h-14 bg-[#006e2d] hover:bg-[#005320] disabled:opacity-60 text-white rounded-xl font-extrabold text-sm md:text-base uppercase tracking-wide flex items-center justify-center gap-2 shadow-sm active:scale-[0.99] transition-all cursor-pointer"
             >
               <CloudUpload className="w-5 h-5" />
               <span>
@@ -679,7 +722,7 @@ export function ProductFormScreen({
               <button
                 type="button"
                 onClick={onCancel}
-                className="flex-1 h-11 rounded-xl text-xs font-bold text-[#434655] hover:bg-[#eaedff] flex items-center justify-center gap-1.5 transition-colors"
+                className="flex-1 h-11 rounded-xl text-xs font-bold text-[#434655] hover:bg-[#eaedff] flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
               >
                 <X className="w-4 h-4" />
                 <span>Cancelar e voltar</span>
@@ -691,7 +734,7 @@ export function ProductFormScreen({
                     <button
                       type="button"
                       onClick={() => setConfirmDelete(true)}
-                      className="h-11 px-4 rounded-xl text-xs font-bold text-[#ba1a1a] hover:bg-[#ffdad6] flex items-center gap-1.5 transition-colors"
+                      className="h-11 px-4 rounded-xl text-xs font-bold text-[#ba1a1a] hover:bg-[#ffdad6] flex items-center gap-1.5 transition-colors cursor-pointer"
                     >
                       <Trash2 className="w-4 h-4" />
                       <span>Excluir</span>
@@ -700,7 +743,7 @@ export function ProductFormScreen({
                     <button
                       type="button"
                       onClick={() => onDelete(existingProduct.barcode)}
-                      className="h-11 px-4 rounded-xl text-xs font-bold bg-[#ba1a1a] text-white flex items-center gap-1.5"
+                      className="h-11 px-4 rounded-xl text-xs font-bold bg-[#ba1a1a] text-white flex items-center gap-1.5 cursor-pointer"
                     >
                       <Trash2 className="w-4 h-4" />
                       <span>Confirmar Exclusão</span>

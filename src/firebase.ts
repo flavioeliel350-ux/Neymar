@@ -19,18 +19,15 @@ import {
   persistentLocalCache,
   persistentMultipleTabManager,
 } from 'firebase/firestore';
-import firebaseConfig from '../firebase-applet-config.json';
+import {
+  appLogger,
+  FIREBASE_CONFIG,
+  validateFirebaseClientConfig,
+} from './config/appConfig';
 
-if (
-  !firebaseConfig?.apiKey ||
-  !firebaseConfig?.authDomain ||
-  !firebaseConfig?.projectId ||
-  !firebaseConfig?.firestoreDatabaseId
-) {
-  throw new Error('Configuração do Firebase incompleta em firebase-applet-config.json.');
-}
+validateFirebaseClientConfig(FIREBASE_CONFIG);
 
-const app = initializeApp(firebaseConfig);
+const app = initializeApp(FIREBASE_CONFIG);
 
 let firestoreInstance: Firestore;
 try {
@@ -41,10 +38,10 @@ try {
         tabManager: persistentMultipleTabManager(),
       }),
     },
-    firebaseConfig.firestoreDatabaseId,
+    FIREBASE_CONFIG.firestoreDatabaseId,
   );
 } catch {
-  firestoreInstance = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+  firestoreInstance = getFirestore(app, FIREBASE_CONFIG.firestoreDatabaseId);
 }
 
 export const db = firestoreInstance;
@@ -128,6 +125,7 @@ export async function signInWithGoogleSafe(): Promise<User> {
     const code = extractAuthErrorCode(err);
     const rawMsg = err instanceof Error ? err.message : String(err);
     const lowerMsg = rawMsg.toLowerCase();
+    appLogger.warn('Auth', `Falha no login com Google (${code || 'desconhecido'})`, rawMsg);
 
     if (
       code === 'auth/unauthorized-domain' ||
@@ -189,6 +187,8 @@ export async function signInWithEmailSafe(email: string, password: string): Prom
     return cred.user;
   } catch (err) {
     const code = extractAuthErrorCode(err);
+    appLogger.warn('Auth', `Erro no login por e-mail (${code || 'desconhecido'})`);
+
     if (
       code === 'auth/invalid-credential' ||
       code === 'auth/wrong-password' ||
@@ -236,11 +236,13 @@ export async function registerWithEmailSafe(
     try {
       await sendEmailVerification(cred.user);
     } catch {
-      // Verification email error can be retried from the verification banner
+      // Verification email can be retried from the verification banner
     }
     return cred.user;
   } catch (err) {
     const code = extractAuthErrorCode(err);
+    appLogger.warn('Auth', `Erro ao criar conta por e-mail (${code || 'desconhecido'})`);
+
     if (code === 'auth/email-already-in-use') {
       throw new AuthFriendlyError('Este e-mail já está cadastrado. Use a aba Entrar.', code);
     }
@@ -330,7 +332,7 @@ export function handleFirestoreError(
     operationType,
     path,
   };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  appLogger.error('Firestore', `Erro em ${operationType} (${path || '-'})`, errInfo);
   throw new Error(JSON.stringify(errInfo));
 }
 
@@ -340,7 +342,7 @@ export async function testConnection(): Promise<boolean> {
     return true;
   } catch (error) {
     if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error('Please check your Firebase configuration.');
+      appLogger.warn('Firestore', 'Cliente sem conexão com o servidor; operando em cache offline.');
       return false;
     }
     return true;

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Coffee,
   CupSoda,
@@ -12,6 +12,8 @@ import { Category } from '../types/product';
 interface ProductVisualProps {
   category: Category;
   weightLabel?: string;
+  imageUrl?: string;
+  alt?: string;
   size?: 'sm' | 'md' | 'lg';
 }
 
@@ -51,7 +53,19 @@ const CATEGORY_STYLES: Record<
   },
 };
 
-export function ProductVisual({ category, weightLabel, size = 'md' }: ProductVisualProps) {
+export function ProductVisual({
+  category,
+  weightLabel,
+  imageUrl,
+  alt = 'Produto',
+  size = 'md',
+}: ProductVisualProps) {
+  const [imgFailed, setImgFailed] = useState(false);
+
+  useEffect(() => {
+    setImgFailed(false);
+  }, [imageUrl]);
+
   const style = CATEGORY_STYLES[category] || CATEGORY_STYLES.Outros;
   const Icon = style.Icon;
 
@@ -65,11 +79,26 @@ export function ProductVisual({ category, weightLabel, size = 'md' }: ProductVis
   const iconSize =
     size === 'sm' ? 'w-5 h-5' : size === 'lg' ? 'w-9 h-9' : 'w-6 h-6';
 
+  const showImage = Boolean(imageUrl && !imgFailed);
+
   return (
     <div
-      className={`relative flex items-center justify-center shrink-0 overflow-hidden ${boxSize} ${style.bg}`}
+      className={`relative flex items-center justify-center shrink-0 overflow-hidden ${boxSize} ${
+        showImage ? 'bg-white border border-[#e2e7ff]' : style.bg
+      }`}
     >
-      <Icon className={`${iconSize} ${style.iconColor}`} />
+      {showImage ? (
+        <img
+          src={imageUrl}
+          alt={alt}
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          onError={() => setImgFailed(true)}
+          className="w-full h-full object-contain p-1"
+        />
+      ) : (
+        <Icon className={`${iconSize} ${style.iconColor}`} />
+      )}
       {size === 'lg' && weightLabel ? (
         <span className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-[#131b2e]/85 text-white text-[10px] font-bold tracking-tight uppercase">
           {weightLabel}

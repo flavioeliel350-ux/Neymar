@@ -75,6 +75,8 @@ export function ProductDetailsScreen({
               <ProductVisual
                 category={product.category}
                 weightLabel={product.weightLabel}
+                imageUrl={product.imageUrl}
+                alt={product.name}
                 size="lg"
               />
               <div className="flex-1 min-w-0">

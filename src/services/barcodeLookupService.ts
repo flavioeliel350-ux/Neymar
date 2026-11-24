@@ -1,3 +1,4 @@
+import { appLogger, BARCODE_CONFIG } from '../config/appConfig';
 import { BarcodeLookupResult, Category } from '../types/product';
 
 const lookupCache = new Map<string, BarcodeLookupResult | null>();
@@ -9,6 +10,9 @@ interface OpenFoodFactsProduct {
   brands?: string;
   quantity?: string;
   categories_tags?: string[];
+  image_front_small_url?: string;
+  image_front_url?: string;
+  image_url?: string;
 }
 
 interface OpenFoodFactsResponse {
@@ -27,7 +31,7 @@ function inferCategory(tags: string[] | undefined, name: string): Category {
     return 'Bebidas';
   }
   if (
-    /cleaning|detergent|soap|bleach|limpeza|detergente|sabao|sabão|amaciante|desinfetante|higiene/.test(
+    /cleaning|detergent|soap|bleach|shampoo|toothpaste|limpeza|detergente|sabao|sabão|amaciante|desinfetante|higiene|perfumaria/.test(
       haystack,
     )
   ) {
@@ -40,9 +44,7 @@ function inferCategory(tags: string[] | undefined, name: string): Category {
   ) {
     return 'Frios';
   }
-  if (
-    /bread|bakery|cake|pastry|pao|pão|bolo|padaria|torrada/.test(haystack)
-  ) {
+  if (/bread|bakery|cake|pastry|pao|pão|bolo|padaria|torrada/.test(haystack)) {
     return 'Padaria';
   }
   if (
@@ -55,18 +57,24 @@ function inferCategory(tags: string[] | undefined, name: string): Category {
   return 'Outros';
 }
 
+function sanitizeHttpsUrl(raw: string | undefined): string | undefined {
+  const trimmed = (raw || '').trim();
+  if (!trimmed.startsWith('https://')) return undefined;
+  return trimmed.slice(0, 500);
+}
+
 async function fetchFromEndpoint(
   baseUrl: string,
   barcode: string,
   source: BarcodeLookupResult['source'],
 ): Promise<BarcodeLookupResult | null> {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 4500);
+  const timeoutId = setTimeout(() => controller.abort(), BARCODE_CONFIG.lookupTimeoutMs);
 
   try {
-    const url = `${baseUrl}/api/v2/product/${encodeURIComponent(
-      barcode,
-    )}.json?fields=product_name,product_name_pt,generic_name,brands,quantity,categories_tags`;
+    const fields =
+      'product_name,product_name_pt,generic_name,brands,quantity,categories_tags,image_front_small_url,image_front_url,image_url';
+    const url = `${baseUrl}/api/v0/product/${encodeURIComponent(barcode)}.json?fields=${fields}`;
     const res = await fetch(url, {
       method: 'GET',
       signal: controller.signal,
@@ -94,15 +102,22 @@ async function fetchFromEndpoint(
         ? `${rawName} ${weightLabel}`.slice(0, 120)
         : rawName.slice(0, 120);
 
+    const imageUrl =
+      sanitizeHttpsUrl(p.image_front_small_url) ||
+      sanitizeHttpsUrl(p.image_front_url) ||
+      sanitizeHttpsUrl(p.image_url);
+
     return {
       barcode,
       name: formattedName,
       brand: brandRaw || undefined,
       weightLabel,
       category: inferCategory(p.categories_tags, formattedName),
+      imageUrl,
       source,
     };
-  } catch {
+  } catch (err) {
+    appLogger.warn('BarcodeLookup', `Falha ou timeout consultando ${source} para ${barcode}`, err);
     return null;
   } finally {
     clearTimeout(timeoutId);
@@ -125,21 +140,20 @@ export async function lookupProductByBarcode(
     return null;
   }
 
-  const foodResult = await fetchFromEndpoint(
-    'https://world.openfoodfacts.org',
-    barcode,
-    'Open Food Facts',
-  );
-  if (foodResult) {
-    lookupCache.set(barcode, foodResult);
-    return foodResult;
+  const endpoints: Array<{ url: string; source: BarcodeLookupResult['source'] }> = [
+    { url: 'https://world.openfoodfacts.org', source: 'Open Food Facts' },
+    { url: 'https://world.openproductsfacts.org', source: 'Open Products Facts' },
+    { url: 'https://world.openbeautyfacts.org', source: 'Open Beauty Facts' },
+  ];
+
+  for (const ep of endpoints) {
+    const result = await fetchFromEndpoint(ep.url, barcode, ep.source);
+    if (result) {
+      lookupCache.set(barcode, result);
+      return result;
+    }
   }
 
-  const productResult = await fetchFromEndpoint(
-    'https://world.openproductsfacts.org',
-    barcode,
-    'Open Products Facts',
-  );
-  lookupCache.set(barcode, productResult);
-  return productResult;
+  lookupCache.set(barcode, null);
+  return null;
 }

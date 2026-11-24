@@ -9,6 +9,7 @@ import {
   ScannerMode,
   StoreInfo,
   StoreOperator,
+  UpdateCheckResult,
 } from './types/product';
 import {
   addScanLog,
@@ -16,7 +17,6 @@ import {
   createLocalAccount,
   deleteLocalAccountOperator,
   deleteProduct,
-  findProductByBarcode,
   getActiveLocalAccountId,
   getAllProducts,
   getLocalAccounts,
@@ -48,9 +48,13 @@ import {
   syncLocalProductsToCloud,
   updateStoreNameInFirestore,
 } from './database/firestoreRepository';
+import { checkForGitHubUpdate } from './services/githubUpdateService';
+import { useBarcodeKeyboardScanner } from './hooks/useBarcodeKeyboardScanner';
+import { playBeep, triggerHaptic } from './utils/feedback';
 import { TopBar } from './components/TopBar';
 import { BottomNav } from './components/BottomNav';
 import { AccountModal } from './components/AccountModal';
+import { UpdateBannerModal } from './components/UpdateBannerModal';
 import { HomeScreen } from './screens/HomeScreen';
 import { ScannerScreen } from './screens/ScannerScreen';
 import { ProductDetailsScreen } from './screens/ProductDetailsScreen';
@@ -82,6 +86,10 @@ export default function App() {
   const [activeOperatorId, setActiveOperatorId] = useState<string>('');
   const [accountModalOpen, setAccountModalOpen] = useState(false);
 
+  const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null);
+  const [checkingUpdates, setCheckingUpdates] = useState(false);
+  const [dismissedUpdateVersion, setDismissedUpdateVersion] = useState<string | null>(null);
+
   const [view, setView] = useState<AppView>('home');
   const [returnView, setReturnView] = useState<AppView>('home');
   const [scannerMode, setScannerMode] = useState<ScannerMode>('query');
@@ -92,6 +100,24 @@ export default function App() {
   if (fatalError) {
     throw fatalError;
   }
+
+  const runUpdateCheck = useCallback(async (force = false) => {
+    setCheckingUpdates(true);
+    try {
+      const result = await checkForGitHubUpdate(force);
+      setUpdateInfo(result);
+    } finally {
+      setCheckingUpdates(false);
+    }
+  }, []);
+
+  // Background non-blocking GitHub update check on startup
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      void runUpdateCheck(false);
+    }, 900);
+    return () => clearTimeout(timer);
+  }, [runUpdateCheck]);
 
   const refreshLocalAccountsAndCounts = useCallback(async () => {
     const accounts = getLocalAccounts();
@@ -289,6 +315,24 @@ export default function App() {
   const products = syncMode === 'cloud' ? cloudProducts : localProducts;
   const logs = syncMode === 'cloud' ? cloudLogs : localLogs;
 
+  // O(1) in-memory cache lookup by barcode for zero-latency reads
+  const productByBarcodeMap = useMemo(() => {
+    const map = new Map<string, Product>();
+    for (const p of products) {
+      map.set(p.barcode.trim(), p);
+    }
+    return map;
+  }, [products]);
+
+  const findProductInstant = useCallback(
+    (barcode: string): Product | null => {
+      const clean = barcode.trim();
+      if (!clean) return null;
+      return productByBarcodeMap.get(clean) || null;
+    },
+    [productByBarcodeMap],
+  );
+
   const todayScans = useMemo(() => {
     if (syncMode === 'local') return localTodayScans;
     const todayKey = new Date().toDateString();
@@ -299,8 +343,8 @@ export default function App() {
 
   const currentActiveProduct = useMemo(() => {
     if (!activeProduct) return null;
-    return products.find((p) => p.barcode === activeProduct.barcode) || activeProduct;
-  }, [activeProduct, products]);
+    return productByBarcodeMap.get(activeProduct.barcode) || activeProduct;
+  }, [activeProduct, productByBarcodeMap]);
 
   const handleSelectOperator = (op: StoreOperator) => {
     setActiveOperatorId(op.id);
@@ -373,17 +417,20 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
   };
 
-  const recordScanLog = async (entry: Omit<ScanLog, 'id' | 'timestamp'>) => {
-    if (syncMode === 'cloud' && authUser && storeInfo) {
-      await addScanLogToFirestore(storeInfo.storeId, storeInfo.ownerId, authUser.uid, {
-        ...entry,
-        operator: operatorCode,
-      });
-    } else if (syncMode === 'local' && activeLocalAccount) {
-      await addScanLog(activeLocalAccount.id, { ...entry, operator: operatorCode });
-      await refreshLocalStoreData(activeLocalAccount.id);
-    }
-  };
+  const recordScanLog = useCallback(
+    async (entry: Omit<ScanLog, 'id' | 'timestamp'>) => {
+      if (syncMode === 'cloud' && authUser && storeInfo) {
+        await addScanLogToFirestore(storeInfo.storeId, storeInfo.ownerId, authUser.uid, {
+          ...entry,
+          operator: operatorCode,
+        });
+      } else if (syncMode === 'local' && activeLocalAccount) {
+        await addScanLog(activeLocalAccount.id, { ...entry, operator: operatorCode });
+        await refreshLocalStoreData(activeLocalAccount.id);
+      }
+    },
+    [syncMode, authUser, storeInfo, activeLocalAccount, operatorCode, refreshLocalStoreData],
+  );
 
   const handleOpenProduct = async (product: Product) => {
     await recordScanLog({
@@ -403,7 +450,7 @@ export default function App() {
       setAccountModalOpen(true);
       return;
     }
-    const existing = products.find((p) => p.barcode === barcode) || null;
+    const existing = findProductInstant(barcode);
     setReturnView(view === 'form' ? 'home' : view);
     setActiveProduct(existing);
     setFormBarcode(barcode);
@@ -412,42 +459,63 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
   };
 
-  const handleScanResolved = async (barcode: string, mode: ScannerMode) => {
-    const found =
-      syncMode === 'cloud'
-        ? products.find((p) => p.barcode === barcode) || null
-        : activeLocalAccount
-          ? await findProductByBarcode(activeLocalAccount.id, barcode)
-          : null;
+  const handleScanResolved = useCallback(
+    async (barcode: string, mode: ScannerMode) => {
+      const found = findProductInstant(barcode);
 
-    if (mode === 'query') {
-      if (found) {
-        await recordScanLog({
-          barcode: found.barcode,
-          productName: found.name,
-          price: found.price,
-          action: 'consulta',
-        });
-        setReturnView('scanner');
-        setActiveProduct(found);
-        setView('details');
-        window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
+      if (mode === 'query') {
+        if (found) {
+          void recordScanLog({
+            barcode: found.barcode,
+            productName: found.name,
+            price: found.price,
+            action: 'consulta',
+          });
+          setReturnView(view === 'details' || view === 'form' ? 'home' : view);
+          setActiveProduct(found);
+          setView('details');
+          window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
+          return;
+        }
+        // Não cadastrado: abre cadastro rápido sem bloquear se for gerente
+        if (canEditPrices) {
+          setReturnView(view === 'form' ? 'home' : view);
+          setActiveProduct(null);
+          setFormBarcode(barcode);
+          setFormLockBarcode(true);
+          setView('form');
+          window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
+        } else {
+          setAccountModalOpen(true);
+        }
+        return;
       }
-      return;
-    }
 
-    if (!canEditPrices) {
-      setAccountModalOpen(true);
-      return;
-    }
+      if (!canEditPrices) {
+        setAccountModalOpen(true);
+        return;
+      }
 
-    setReturnView('scanner');
-    setActiveProduct(found);
-    setFormBarcode(barcode);
-    setFormLockBarcode(true);
-    setView('form');
-    window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
-  };
+      setReturnView(view === 'form' ? 'home' : view);
+      setActiveProduct(found);
+      setFormBarcode(barcode);
+      setFormLockBarcode(true);
+      setView('form');
+      window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
+    },
+    [findProductInstant, recordScanLog, view, canEditPrices],
+  );
+
+  // Global USB / Bluetooth keyboard-emulated barcode scanner listener
+  useBarcodeKeyboardScanner({
+    enabled: syncMode !== 'none' && !accountModalOpen && view !== 'form',
+    onScan: (code) => {
+      triggerHaptic(35);
+      const found = findProductInstant(code);
+      playBeep(found ? 'success' : 'error');
+      void handleScanResolved(code, view === 'scanner' ? scannerMode : 'query');
+    },
+  });
 
   const handleEditFromDetails = (product: Product) => {
     if (!canEditPrices) {
@@ -465,9 +533,7 @@ export default function App() {
   const handleSaveProduct = async (
     payload: Omit<Product, 'updatedAt'>,
   ): Promise<Product> => {
-    const existedBefore = Boolean(
-      products.find((p) => p.barcode === payload.barcode),
-    );
+    const existedBefore = Boolean(findProductInstant(payload.barcode));
 
     if (syncMode === 'cloud' && authUser && storeInfo) {
       const saved = await saveProductToFirestore(
@@ -519,7 +585,7 @@ export default function App() {
   };
 
   const handleAdjustStock = async (barcode: string, delta: number) => {
-    const existing = products.find((p) => p.barcode === barcode);
+    const existing = findProductInstant(barcode);
     if (!existing) return;
 
     if (syncMode === 'cloud' && authUser && storeInfo) {
@@ -634,6 +700,12 @@ export default function App() {
         onOpenAccount={() => setAccountModalOpen(true)}
       />
 
+      <UpdateBannerModal
+        updateInfo={updateInfo}
+        dismissedVersion={dismissedUpdateVersion}
+        onDismiss={setDismissedUpdateVersion}
+      />
+
       <main className="flex-1 w-full">
         {loading ? (
           <div className="max-w-6xl mx-auto px-4 py-12 flex flex-col items-center justify-center gap-3">
@@ -667,6 +739,9 @@ export default function App() {
             onDeleteOperator={handleDeleteOperator}
             onUpdateStoreName={handleUpdateStoreName}
             onSyncLocalAccountToCloud={handleSyncLocalAccountToCloud}
+            updateInfo={updateInfo}
+            checkingUpdates={checkingUpdates}
+            onCheckUpdates={runUpdateCheck}
           />
         ) : (
           <>
@@ -691,6 +766,7 @@ export default function App() {
               <ScannerScreen
                 mode={scannerMode}
                 products={products}
+                findByBarcode={findProductInstant}
                 onChangeMode={setScannerMode}
                 onScanResolved={handleScanResolved}
                 onBack={() => handleNavigate('home')}
@@ -773,6 +849,9 @@ export default function App() {
           onDeleteOperator={handleDeleteOperator}
           onUpdateStoreName={handleUpdateStoreName}
           onSyncLocalAccountToCloud={handleSyncLocalAccountToCloud}
+          updateInfo={updateInfo}
+          checkingUpdates={checkingUpdates}
+          onCheckUpdates={runUpdateCheck}
         />
       )}
     </div>

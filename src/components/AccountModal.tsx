@@ -9,7 +9,11 @@ import {
   Check,
   Cloud,
   CloudUpload,
+  Download,
+  ExternalLink,
+  GitBranch,
   HardDrive,
+  Info,
   KeyRound,
   LogIn,
   LogOut,
@@ -17,12 +21,14 @@ import {
   Plus,
   RefreshCw,
   ShieldCheck,
+  Sparkles,
   Store,
   Trash2,
   UserCheck,
   Users,
   X,
 } from 'lucide-react';
+import { APP_VERSION } from '../config/appConfig';
 import {
   AuthFriendlyError,
   detectAuthEnvironment,
@@ -31,7 +37,17 @@ import {
   signInWithEmailSafe,
   signInWithGoogleSafe,
 } from '../firebase';
-import { LocalAccount, StoreInfo, StoreOperator, UserRole } from '../types/product';
+import {
+  getEffectiveGitHubRepo,
+  saveGitHubRepoOverride,
+} from '../services/githubUpdateService';
+import {
+  LocalAccount,
+  StoreInfo,
+  StoreOperator,
+  UpdateCheckResult,
+  UserRole,
+} from '../types/product';
 import { triggerHaptic } from '../utils/feedback';
 
 type AuthTab = 'local' | 'email' | 'google';
@@ -63,6 +79,9 @@ interface AccountModalProps {
   onDeleteOperator: (operatorId: string) => Promise<void>;
   onUpdateStoreName: (name: string) => Promise<void>;
   onSyncLocalAccountToCloud: (localAccountId: string) => Promise<number>;
+  updateInfo: UpdateCheckResult | null;
+  checkingUpdates: boolean;
+  onCheckUpdates: (force?: boolean) => Promise<void>;
 }
 
 export function AccountModal({
@@ -87,6 +106,9 @@ export function AccountModal({
   onDeleteOperator,
   onUpdateStoreName,
   onSyncLocalAccountToCloud,
+  updateInfo,
+  checkingUpdates,
+  onCheckUpdates,
 }: AccountModalProps) {
   const [authTab, setAuthTab] = useState<AuthTab>('local');
   const [emailMode, setEmailMode] = useState<EmailSubMode>('login');
@@ -125,6 +147,12 @@ export function AccountModal({
   const [newOpPin, setNewOpPin] = useState('');
   const [opError, setOpError] = useState<string | null>(null);
   const [savingOp, setSavingOp] = useState(false);
+
+  const initialRepo = useMemo(() => getEffectiveGitHubRepo(), []);
+  const [editingGitHubRepo, setEditingGitHubRepo] = useState(false);
+  const [ghOwnerInput, setGhOwnerInput] = useState(initialRepo.owner);
+  const [ghRepoInput, setGhRepoInput] = useState(initialRepo.repo);
+  const [ghBranchInput, setGhBranchInput] = useState(initialRepo.branch);
 
   const envInfo = useMemo(() => detectAuthEnvironment(), []);
   const isManager = activeOperator?.role === 'admin';
@@ -1114,6 +1142,165 @@ export function AccountModal({
     </div>
   );
 
+  const handleSaveGitHubRepo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    saveGitHubRepoOverride({
+      owner: ghOwnerInput,
+      repo: ghRepoInput,
+      branch: ghBranchInput || 'main',
+    });
+    setEditingGitHubRepo(false);
+    await onCheckUpdates(true);
+  };
+
+  const renderUpdatesAndAboutCard = () => {
+    const repoCfg = getEffectiveGitHubRepo();
+    const repoLabel =
+      repoCfg.owner && repoCfg.repo
+        ? `${repoCfg.owner}/${repoCfg.repo}`
+        : 'Não configurado';
+
+    return (
+      <div className="bg-white rounded-2xl border border-[#e2e7ff] p-4 flex flex-col gap-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <Info className="w-4 h-4 text-[#004ac6] shrink-0" />
+            <div className="min-w-0">
+              <h3 className="text-sm font-extrabold text-[#131b2e]">
+                Sobre &amp; Atualizações
+              </h3>
+              <p className="text-[11px] text-[#434655] truncate">
+                ProntoPreço v{APP_VERSION} · GitHub: {repoLabel}
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            disabled={checkingUpdates}
+            onClick={() => void onCheckUpdates(true)}
+            className="h-9 px-3 rounded-lg bg-[#eaedff] hover:bg-[#dae2fd] disabled:opacity-60 text-[#004ac6] text-xs font-bold flex items-center gap-1.5 shrink-0 cursor-pointer"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${checkingUpdates ? 'animate-spin' : ''}`} />
+            <span>{checkingUpdates ? 'Verificando...' : 'Verificar'}</span>
+          </button>
+        </div>
+
+        {updateInfo && (
+          <div
+            className={`p-3 rounded-xl text-xs flex flex-col gap-2 ${
+              updateInfo.status === 'update_available'
+                ? 'bg-[#eaedff] text-[#131b2e] border border-[#b4c5ff]'
+                : updateInfo.status === 'up_to_date'
+                  ? 'bg-[#dcfce7] text-[#005320]'
+                  : 'bg-[#f2f3ff] text-[#434655]'
+            }`}
+          >
+            <div className="flex items-start gap-2 font-bold">
+              {updateInfo.status === 'update_available' && (
+                <Sparkles className="w-4 h-4 text-[#2563eb] shrink-0 mt-0.5" />
+              )}
+              <span>{updateInfo.message}</span>
+            </div>
+
+            {updateInfo.status === 'update_available' && updateInfo.releaseNotes && (
+              <p className="text-[11px] text-[#434655] line-clamp-3 whitespace-pre-wrap">
+                {updateInfo.releaseNotes}
+              </p>
+            )}
+
+            {updateInfo.status === 'update_available' && updateInfo.releaseUrl && (
+              <div className="flex flex-wrap gap-2 pt-0.5">
+                {updateInfo.assets?.[0] && (
+                  <a
+                    href={updateInfo.assets[0].url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3 py-1.5 rounded-lg bg-[#2563eb] hover:bg-[#004ac6] text-white text-xs font-bold inline-flex items-center gap-1.5"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Baixar {updateInfo.assets[0].name}</span>
+                  </a>
+                )}
+                <a
+                  href={updateInfo.releaseUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1.5 rounded-lg bg-white hover:bg-[#f2f3ff] text-[#004ac6] border border-[#cbd5e1] text-xs font-bold inline-flex items-center gap-1.5"
+                >
+                  <span>Abrir Releases no GitHub</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              </div>
+            )}
+          </div>
+        )}
+
+        {!editingGitHubRepo ? (
+          <button
+            type="button"
+            onClick={() => {
+              const curr = getEffectiveGitHubRepo();
+              setGhOwnerInput(curr.owner);
+              setGhRepoInput(curr.repo);
+              setGhBranchInput(curr.branch);
+              setEditingGitHubRepo(true);
+            }}
+            className="self-start text-[11px] font-bold text-[#004ac6] hover:underline flex items-center gap-1 cursor-pointer"
+          >
+            <GitBranch className="w-3.5 h-3.5" />
+            <span>
+              {repoCfg.owner && repoCfg.repo
+                ? 'Alterar repositório GitHub'
+                : 'Configurar repositório GitHub (owner/repo)'}
+            </span>
+          </button>
+        ) : (
+          <form onSubmit={handleSaveGitHubRepo} className="flex flex-col gap-2 pt-1">
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                type="text"
+                value={ghOwnerInput}
+                onChange={(e) => setGhOwnerInput(e.target.value)}
+                placeholder="Usuário/Org (owner)"
+                className="h-9 px-2.5 rounded-lg bg-[#f2f3ff] border border-[#cbd5e1] text-xs font-semibold text-[#131b2e] outline-none"
+              />
+              <input
+                type="text"
+                value={ghRepoInput}
+                onChange={(e) => setGhRepoInput(e.target.value)}
+                placeholder="Nome do repo"
+                className="h-9 px-2.5 rounded-lg bg-[#f2f3ff] border border-[#cbd5e1] text-xs font-semibold text-[#131b2e] outline-none"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={ghBranchInput}
+                onChange={(e) => setGhBranchInput(e.target.value)}
+                placeholder="Branch (ex: main)"
+                className="w-28 h-9 px-2.5 rounded-lg bg-[#f2f3ff] border border-[#cbd5e1] text-xs font-semibold text-[#131b2e] outline-none"
+              />
+              <button
+                type="submit"
+                className="flex-1 h-9 rounded-lg bg-[#2563eb] text-white text-xs font-bold cursor-pointer"
+              >
+                Salvar e Verificar
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditingGitHubRepo(false)}
+                className="h-9 px-2.5 rounded-lg bg-[#eaedff] text-[#434655] text-xs font-bold cursor-pointer"
+              >
+                Cancelar
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    );
+  };
+
   const body = (
     <div className="flex flex-col gap-4">
       {isUnverifiedCloudUser
@@ -1121,6 +1308,7 @@ export function AccountModal({
         : syncMode === 'none'
           ? renderAuthSelector()
           : renderActiveStorePanel()}
+      {renderUpdatesAndAboutCard()}
     </div>
   );
 

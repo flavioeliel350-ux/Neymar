@@ -87,8 +87,8 @@ service cloud.firestore {
         && data.keys().hasOnly([
           'barcode', 'storeId', 'ownerId', 'name', 'brand', 'category',
           'price', 'wholesalePrice', 'clubPrice', 'marginPercent', 'stock',
-          'location', 'weightLabel', 'description', 'operator', 'updatedBy',
-          'createdAt', 'updatedAt'
+          'location', 'weightLabel', 'description', 'imageUrl', 'operator',
+          'updatedBy', 'createdAt', 'updatedAt'
         ])
         && data.barcode is string && data.barcode.size() >= 1 && data.barcode.size() <= 32 && data.barcode.matches('^[a-zA-Z0-9_\\-]+$')
         && data.storeId is string && isValidId(data.storeId)
@@ -104,6 +104,7 @@ service cloud.firestore {
         && data.location is string && data.location.size() >= 1 && data.location.size() <= 80
         && data.weightLabel is string && data.weightLabel.size() >= 1 && data.weightLabel.size() <= 24
         && data.description is string && data.description.size() <= 240
+        && (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 500 && data.imageUrl.matches('^(|https://.*)$')))
         && data.operator is string && data.operator.size() >= 1 && data.operator.size() <= 32
         && data.updatedBy is string && data.updatedBy == request.auth.uid
         && data.createdAt is timestamp
@@ -238,7 +239,7 @@ service cloud.firestore {
             || incoming().diff(existing()).affectedKeys().hasOnly([
               'name', 'brand', 'category', 'price', 'wholesalePrice',
               'clubPrice', 'marginPercent', 'stock', 'location',
-              'weightLabel', 'description', 'operator', 'updatedBy', 'updatedAt'
+              'weightLabel', 'description', 'imageUrl', 'operator', 'updatedBy', 'updatedAt'
             ])
           );
         allow delete: if isValidId(storeId) && isValidId(barcode) && isStoreOwner(storeId);

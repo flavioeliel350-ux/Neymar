@@ -14,6 +14,7 @@ import {
 import { AppView, Product, ScanLog, ScannerMode, StoreOperator } from '../types/product';
 import { formatBRL, formatRelativeTime, triggerHaptic } from '../utils/feedback';
 import { ProductVisual } from '../components/ProductVisual';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 
 interface HomeScreenProps {
   products: Product[];
@@ -45,9 +46,10 @@ export function HomeScreen({
   onOpenAccount,
 }: HomeScreenProps) {
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedQuery = useDebouncedValue(searchQuery, 120);
 
   const quickMatches = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
+    const q = debouncedQuery.trim().toLowerCase();
     if (!q) return [];
     return products
       .filter(
@@ -57,7 +59,7 @@ export function HomeScreen({
           p.brand.toLowerCase().includes(q),
       )
       .slice(0, 5);
-  }, [products, searchQuery]);
+  }, [products, debouncedQuery]);
 
   const isNumericEanCandidate = useMemo(() => {
     const trimmed = searchQuery.trim();
@@ -396,6 +398,8 @@ export function HomeScreen({
                       <div className="flex items-center gap-2.5 min-w-0">
                         <ProductVisual
                           category={matchedProduct?.category || 'Mercearia'}
+                          imageUrl={matchedProduct?.imageUrl}
+                          alt={log.productName}
                           size="sm"
                         />
                         <div className="min-w-0">

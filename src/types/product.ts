@@ -24,6 +24,7 @@ export interface Product {
   location: string;
   weightLabel: string;
   description?: string;
+  imageUrl?: string;
   operator: string;
   updatedAt: string;
 }
@@ -76,7 +77,43 @@ export interface BarcodeLookupResult {
   brand?: string;
   weightLabel?: string;
   category?: Category;
-  source: 'Open Food Facts' | 'Open Products Facts';
+  imageUrl?: string;
+  source: 'Open Food Facts' | 'Open Products Facts' | 'Open Beauty Facts';
+}
+
+export interface GitHubRepoOverride {
+  owner: string;
+  repo: string;
+  branch: string;
+}
+
+export type UpdateCheckStatus =
+  | 'idle'
+  | 'checking'
+  | 'up_to_date'
+  | 'update_available'
+  | 'offline'
+  | 'not_configured'
+  | 'rate_limited'
+  | 'unavailable';
+
+export interface UpdateDownloadAsset {
+  name: string;
+  url: string;
+}
+
+export interface UpdateCheckResult {
+  status: UpdateCheckStatus;
+  currentVersion: string;
+  latestVersion?: string;
+  releaseTitle?: string;
+  releaseNotes?: string;
+  releaseUrl?: string;
+  publishedAt?: string;
+  assets?: UpdateDownloadAsset[];
+  checkedAt: string;
+  message: string;
+  fromCache?: boolean;
 }
 
 export type ScannerMode = 'query' | 'register';

@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BrowserMultiFormatReader } from '@zxing/browser';
+import { BarcodeFormat, DecodeHintType } from '@zxing/library';
 import {
   ArrowLeft,
   Camera,
@@ -9,36 +10,46 @@ import {
   Edit3,
   Flashlight,
   FlashlightOff,
+  Focus,
   Keyboard,
+  PackageOpen,
   RefreshCw,
+  ScanBarcode,
   ScanLine,
   Search,
+  Sparkles,
+  Usb,
   Volume2,
   VolumeX,
   X,
 } from 'lucide-react';
-import { Product, ScannerMode } from '../types/product';
+import { BARCODE_CONFIG } from '../config/appConfig';
+import { lookupProductByBarcode } from '../services/barcodeLookupService';
+import { BarcodeLookupResult, Product, ScannerMode } from '../types/product';
 import { formatBRL, playBeep, triggerHaptic } from '../utils/feedback';
 
 interface ScannerScreenProps {
   mode: ScannerMode;
   products: Product[];
+  findByBarcode: (barcode: string) => Product | null;
   onChangeMode: (mode: ScannerMode) => void;
   onScanResolved: (barcode: string, mode: ScannerMode) => void;
   onBack: () => void;
 }
 
-const DEMO_SHELF_CODES = [
-  { code: '7891000053508', label: 'Biscoito Maizena 400g' },
-  { code: '7891000100103', label: 'Café Pilão 500g' },
-  { code: '7891000315507', label: 'Leite Integral 1L' },
-  { code: '7894900011517', label: 'Refrigerante Cola 2L' },
-  { code: '7899999000999', label: 'Código Novo (Não Cadastrado)' },
+const RETAIL_FORMATS = [
+  BarcodeFormat.EAN_13,
+  BarcodeFormat.EAN_8,
+  BarcodeFormat.UPC_A,
+  BarcodeFormat.UPC_E,
+  BarcodeFormat.CODE_128,
+  BarcodeFormat.QR_CODE,
 ];
 
 export function ScannerScreen({
   mode,
   products,
+  findByBarcode,
   onChangeMode,
   onScanResolved,
   onBack,
@@ -46,59 +57,114 @@ export function ScannerScreen({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const controlsRef = useRef<{ stop: () => void } | null>(null);
   const lastScannedRef = useRef<{ code: string; at: number } | null>(null);
+  const pauseUntilRef = useRef<number>(0);
+  const pauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const usbInputRef = useRef<HTMLInputElement | null>(null);
 
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const [cameraStatus, setCameraStatus] = useState<'starting' | 'active' | 'fallback'>('starting');
   const [torchOn, setTorchOn] = useState(false);
+  const [torchSupported, setTorchSupported] = useState(false);
+  const [focusSupported, setFocusSupported] = useState(false);
+  const [focusPulse, setFocusPulse] = useState(false);
+  const [scanPausedNotice, setScanPausedNotice] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
 
-  const [focusedBarcode, setFocusedBarcode] = useState<string>('7891000053508');
+  const [focusedBarcode, setFocusedBarcode] = useState<string>('');
   const [notFoundAlert, setNotFoundAlert] = useState<string | null>(null);
-  const [showManualModal, setShowManualModal] = useState(false);
-  const [manualInput, setManualInput] = useState('7891000100103');
+  const [externalPreview, setExternalPreview] = useState<BarcodeLookupResult | null>(null);
 
-  const focusedProduct = products.find((p) => p.barcode === focusedBarcode) || null;
+  const [usbQuickInput, setUsbQuickInput] = useState('');
+  const [showManualModal, setShowManualModal] = useState(false);
+  const [manualInput, setManualInput] = useState('');
+
+  const focusedProduct = useMemo(
+    () => (focusedBarcode ? findByBarcode(focusedBarcode) : null),
+    [focusedBarcode, findByBarcode],
+  );
+
+  const storeQuickItems = useMemo(() => products.slice(0, 6), [products]);
+
+  const prefetchExternalInfo = useCallback(async (barcode: string) => {
+    setExternalPreview(null);
+    const info = await lookupProductByBarcode(barcode);
+    if (info) {
+      setExternalPreview(info);
+    }
+  }, []);
 
   const processBarcode = useCallback(
     (code: string, immediate = false) => {
-      const clean = code.trim();
+      const clean = code.trim().replace(/\s+/g, '');
       if (!clean) return;
 
       const now = Date.now();
-      if (
-        !immediate &&
-        lastScannedRef.current &&
-        lastScannedRef.current.code === clean &&
-        now - lastScannedRef.current.at < 2000
-      ) {
-        return;
+      // Proteção síncrona contra múltiplos callbacks no mesmo milissegundo
+      if (!immediate) {
+        if (now < pauseUntilRef.current) {
+          return;
+        }
+        if (
+          lastScannedRef.current &&
+          lastScannedRef.current.code === clean &&
+          now - lastScannedRef.current.at < BARCODE_CONFIG.scanCooldownMs
+        ) {
+          return;
+        }
       }
+
       lastScannedRef.current = { code: clean, at: now };
+      pauseUntilRef.current = now + BARCODE_CONFIG.postScanBriefPauseMs;
+      setScanPausedNotice(true);
+      if (pauseTimerRef.current) clearTimeout(pauseTimerRef.current);
+      pauseTimerRef.current = setTimeout(() => {
+        setScanPausedNotice(false);
+      }, BARCODE_CONFIG.postScanBriefPauseMs);
 
       setFocusedBarcode(clean);
       triggerHaptic(40);
 
-      const exists = products.find((p) => p.barcode === clean);
+      const exists = findByBarcode(clean);
       if (mode === 'query' && !exists) {
         if (soundEnabled) playBeep('error');
         setNotFoundAlert(clean);
+        void prefetchExternalInfo(clean);
         return;
       }
 
       if (soundEnabled) playBeep('success');
       setNotFoundAlert(null);
+      setExternalPreview(null);
       onScanResolved(clean, mode);
     },
-    [mode, onScanResolved, products, soundEnabled],
+    [findByBarcode, mode, onScanResolved, prefetchExternalInfo, soundEnabled],
   );
 
-  // Initialize real webcam / mobile camera barcode reader via ZXing
+  useEffect(() => {
+    return () => {
+      if (pauseTimerRef.current) clearTimeout(pauseTimerRef.current);
+    };
+  }, []);
+
+  // Initialize ZXing camera reader with explicit retail barcode hints + capability detection
   useEffect(() => {
     let cancelled = false;
-    const reader = new BrowserMultiFormatReader();
+
+    const hints = new Map<DecodeHintType, unknown>();
+    hints.set(DecodeHintType.POSSIBLE_FORMATS, RETAIL_FORMATS);
+    hints.set(DecodeHintType.TRY_HARDER, true);
+
+    const reader = new BrowserMultiFormatReader(hints, {
+      delayBetweenScanAttempts: 120,
+      delayBetweenScanSuccess: BARCODE_CONFIG.postScanBriefPauseMs,
+    });
 
     async function startCamera() {
       setCameraStatus('starting');
+      setTorchOn(false);
+      setTorchSupported(false);
+      setFocusSupported(false);
+
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         setCameraStatus('fallback');
         return;
@@ -134,8 +200,29 @@ export function ScannerScreen({
           controls.stop();
           return;
         }
+
         controlsRef.current = controls;
         setCameraStatus('active');
+
+        // Inspect hardware camera capabilities (torch / autofocus)
+        try {
+          const stream = videoEl.srcObject as MediaStream | null;
+          const track = stream?.getVideoTracks()?.[0];
+          const caps = (track?.getCapabilities?.() || {}) as Record<string, unknown>;
+          setTorchSupported(Boolean(caps.torch));
+
+          const modes = Array.isArray(caps.focusMode) ? (caps.focusMode as string[]) : [];
+          if (modes.includes('continuous') || modes.includes('single-shot')) {
+            setFocusSupported(true);
+            if (modes.includes('continuous') && track?.applyConstraints) {
+              await track.applyConstraints({
+                advanced: [{ focusMode: 'continuous' } as MediaTrackConstraintSet],
+              });
+            }
+          }
+        } catch {
+          // Hardware capability inspection is optional
+        }
       } catch {
         if (!cancelled) {
           setCameraStatus('fallback');
@@ -170,8 +257,40 @@ export function ScannerScreen({
         });
       }
     } catch {
-      // Torch constraint is only available on supported mobile hardware
+      setTorchOn(false);
     }
+  };
+
+  const handleRefocus = async () => {
+    setFocusPulse(true);
+    triggerHaptic(15);
+    setTimeout(() => setFocusPulse(false), 600);
+    try {
+      const stream = videoRef.current?.srcObject as MediaStream | null;
+      const track = stream?.getVideoTracks()?.[0];
+      if (track) {
+        await track.applyConstraints({
+          advanced: [{ focusMode: 'single-shot' } as MediaTrackConstraintSet],
+        });
+        setTimeout(() => {
+          track
+            .applyConstraints({
+              advanced: [{ focusMode: 'continuous' } as MediaTrackConstraintSet],
+            })
+            .catch(() => {});
+        }, 700);
+      }
+    } catch {
+      // Focus constraint unsupported on some webcams
+    }
+  };
+
+  const handleUsbSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleaned = usbQuickInput.trim();
+    if (!cleaned) return;
+    setUsbQuickInput('');
+    processBarcode(cleaned, true);
   };
 
   const handleManualConfirm = (e: React.FormEvent) => {
@@ -193,37 +312,27 @@ export function ScannerScreen({
               ref={videoRef}
               muted
               playsInline
+              onClick={handleRefocus}
               className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 ${
                 cameraStatus === 'active' ? 'opacity-100' : 'opacity-0 pointer-events-none'
               }`}
             />
 
-            {/* Fallback Simulated Retail Shelf Calibration View when webcam isn't attached */}
+            {/* Fallback View when camera permission unavailable */}
             {cameraStatus !== 'active' && (
-              <div className="absolute inset-0 bg-gradient-to-br from-[#1e293b] via-[#0f172a] to-[#1e1b4b] flex items-center justify-center">
-                {/* Subtle barcode visual in reticle background for realistic floor preview */}
-                <div className="w-64 sm:w-72 rounded-xl bg-white/95 p-4 shadow-xl border border-white/20 flex flex-col items-center gap-2 opacity-90">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-[#434655]">
-                    {focusedProduct ? focusedProduct.brand : 'Leitura Óptica'}
-                  </span>
-                  <p className="text-xs font-extrabold text-[#131b2e] text-center line-clamp-1">
-                    {focusedProduct ? focusedProduct.name : 'Novo Código em Foco'}
+              <div className="absolute inset-0 bg-gradient-to-br from-[#1e293b] via-[#0f172a] to-[#1e1b4b] flex items-center justify-center px-4">
+                <div className="w-full max-w-xs rounded-xl bg-white/95 p-4 shadow-xl border border-white/20 flex flex-col items-center gap-2 text-center">
+                  <ScanBarcode className="w-8 h-8 text-[#2563eb]" />
+                  <p className="text-xs font-extrabold text-[#131b2e]">
+                    {cameraStatus === 'starting'
+                      ? 'Iniciando câmera...'
+                      : 'Câmera indisponível neste dispositivo'}
                   </p>
-                  {/* Realistic SVG EAN-13 Bars */}
-                  <div className="w-full h-14 flex items-stretch justify-center gap-[2px] px-3 py-1 bg-white">
-                    {[3, 1, 2, 1, 3, 2, 1, 1, 2, 3, 1, 2, 1, 1, 3, 2, 1, 2, 1, 3, 1, 2, 2, 1, 3, 1, 2, 1, 3, 1].map(
-                      (w, idx) => (
-                        <div
-                          key={idx}
-                          className="bg-[#0f172a]"
-                          style={{ width: `${w * 2}px` }}
-                        />
-                      ),
-                    )}
-                  </div>
-                  <span className="font-mono text-xs font-bold tracking-[0.2em] text-[#131b2e]">
-                    {focusedBarcode}
-                  </span>
+                  <p className="text-[11px] text-[#434655] leading-snug">
+                    {focusedBarcode
+                      ? `Código em foco: ${focusedBarcode}`
+                      : 'Use um leitor USB/Bluetooth ou digite o código manualmente.'}
+                  </p>
                 </div>
               </div>
             )}
@@ -238,7 +347,7 @@ export function ScannerScreen({
                   type="button"
                   onClick={onBack}
                   aria-label="Voltar para início"
-                  className="w-11 h-11 rounded-full bg-black/50 backdrop-blur-md flex items-center justify-center text-white hover:bg-black/70 active:scale-95 transition-all shrink-0"
+                  className="w-11 h-11 rounded-full bg-black/50 backdrop-blur-md flex items-center justify-center text-white hover:bg-black/70 active:scale-95 transition-all shrink-0 cursor-pointer"
                 >
                   <ArrowLeft className="w-5 h-5" />
                 </button>
@@ -249,9 +358,10 @@ export function ScannerScreen({
                     type="button"
                     onClick={() => {
                       setNotFoundAlert(null);
+                      setExternalPreview(null);
                       onChangeMode('query');
                     }}
-                    className={`px-3.5 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 whitespace-nowrap transition-all ${
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 whitespace-nowrap transition-all cursor-pointer ${
                       mode === 'query'
                         ? 'bg-[#2563eb] text-white'
                         : 'text-white/80 hover:text-white'
@@ -264,9 +374,10 @@ export function ScannerScreen({
                     type="button"
                     onClick={() => {
                       setNotFoundAlert(null);
+                      setExternalPreview(null);
                       onChangeMode('register');
                     }}
-                    className={`px-3.5 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 whitespace-nowrap transition-all ${
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 whitespace-nowrap transition-all cursor-pointer ${
                       mode === 'register'
                         ? 'bg-[#007b71] text-white'
                         : 'text-white/80 hover:text-white'
@@ -277,39 +388,61 @@ export function ScannerScreen({
                   </button>
                 </div>
 
-                {/* Torch & Camera Flip */}
+                {/* Focus, Torch, Camera Flip & Audio */}
                 <div className="flex items-center gap-1.5 shrink-0">
-                  <button
-                    type="button"
-                    onClick={handleToggleTorch}
-                    aria-label={torchOn ? 'Desligar lanterna' : 'Ligar lanterna'}
-                    className={`w-10 h-10 rounded-full backdrop-blur-md flex items-center justify-center transition-all active:scale-95 ${
-                      torchOn
-                        ? 'bg-[#7ffc97] text-[#002109]'
-                        : 'bg-black/50 text-white hover:bg-black/70'
-                    }`}
-                  >
-                    {torchOn ? (
-                      <Flashlight className="w-4 h-4" />
-                    ) : (
-                      <FlashlightOff className="w-4 h-4" />
-                    )}
-                  </button>
+                  {focusSupported && cameraStatus === 'active' && (
+                    <button
+                      type="button"
+                      onClick={handleRefocus}
+                      aria-label="Focar câmera"
+                      title="Refocar lente"
+                      className={`w-10 h-10 rounded-full backdrop-blur-md flex items-center justify-center transition-all active:scale-95 cursor-pointer ${
+                        focusPulse
+                          ? 'bg-[#7ffc97] text-[#002109]'
+                          : 'bg-black/50 text-white hover:bg-black/70'
+                      }`}
+                    >
+                      <Focus className="w-4 h-4" />
+                    </button>
+                  )}
+
+                  {(torchSupported || cameraStatus === 'active') && (
+                    <button
+                      type="button"
+                      onClick={handleToggleTorch}
+                      disabled={!torchSupported && cameraStatus !== 'active'}
+                      aria-label={torchOn ? 'Desligar lanterna' : 'Ligar lanterna'}
+                      title={torchSupported ? 'Lanterna' : 'Lanterna (se suportada)'}
+                      className={`w-10 h-10 rounded-full backdrop-blur-md flex items-center justify-center transition-all active:scale-95 cursor-pointer ${
+                        torchOn
+                          ? 'bg-[#7ffc97] text-[#002109]'
+                          : 'bg-black/50 text-white hover:bg-black/70'
+                      }`}
+                    >
+                      {torchOn ? (
+                        <Flashlight className="w-4 h-4" />
+                      ) : (
+                        <FlashlightOff className="w-4 h-4" />
+                      )}
+                    </button>
+                  )}
+
                   <button
                     type="button"
                     onClick={() =>
                       setFacingMode((prev) => (prev === 'environment' ? 'user' : 'environment'))
                     }
                     aria-label="Alternar câmera"
-                    className="w-10 h-10 rounded-full bg-black/50 backdrop-blur-md flex items-center justify-center text-white hover:bg-black/70 active:scale-95 transition-all"
+                    className="w-10 h-10 rounded-full bg-black/50 backdrop-blur-md flex items-center justify-center text-white hover:bg-black/70 active:scale-95 transition-all cursor-pointer"
                   >
                     <RefreshCw className="w-4 h-4" />
                   </button>
+
                   <button
                     type="button"
                     onClick={() => setSoundEnabled((prev) => !prev)}
                     aria-label={soundEnabled ? 'Silenciar bip' : 'Ativar som do bip'}
-                    className="w-10 h-10 rounded-full bg-black/50 backdrop-blur-md flex items-center justify-center text-white hover:bg-black/70 active:scale-95 transition-all"
+                    className="w-10 h-10 rounded-full bg-black/50 backdrop-blur-md flex items-center justify-center text-white hover:bg-black/70 active:scale-95 transition-all cursor-pointer"
                   >
                     {soundEnabled ? (
                       <Volume2 className="w-4 h-4" />
@@ -323,53 +456,68 @@ export function ScannerScreen({
               <div className="self-center px-3 py-1 rounded-full bg-black/50 backdrop-blur-md text-[11px] font-bold text-[#7ffc97] tracking-wide flex items-center gap-1.5">
                 <Camera className="w-3.5 h-3.5" />
                 <span>
-                  {cameraStatus === 'active'
-                    ? 'Câmera Ao Vivo · Leitura Automática'
-                    : 'Modo Balcão / Simulador Óptico'}
+                  {scanPausedNotice
+                    ? 'Leitura confirmada · Pausa anti-duplicidade'
+                    : cameraStatus === 'active'
+                      ? 'Câmera Ao Vivo · EAN / UPC / Code 128 / QR'
+                      : 'Pronto para Leitor USB ou Digitação Manual'}
                 </span>
               </div>
             </div>
 
-            {/* Center Target Reticle */}
-            <div className="relative z-10 flex flex-col items-center justify-center my-6">
-              <div className="relative w-64 sm:w-72 h-44 flex items-center justify-center">
-                {/* Laser Sweep */}
+            {/* Center Target Reticle (tap to focus) */}
+            <div
+              onClick={cameraStatus === 'active' ? handleRefocus : undefined}
+              className="relative z-10 flex flex-col items-center justify-center my-6"
+            >
+              <div
+                className={`relative w-64 sm:w-72 h-44 flex items-center justify-center transition-transform ${
+                  focusPulse ? 'scale-95' : 'scale-100'
+                }`}
+              >
                 <div className="absolute top-1 left-2 right-2 h-0.5 bg-[#7ffc97] shadow-[0_0_12px_3px_rgba(127,252,151,0.85)] animate-scan-laser rounded-full" />
 
-                {/* Corner Brackets */}
                 <div className="absolute top-0 left-0 w-7 h-7 border-t-[3.5px] border-l-[3.5px] border-[#7ffc97] rounded-tl-lg" />
                 <div className="absolute top-0 right-0 w-7 h-7 border-t-[3.5px] border-r-[3.5px] border-[#7ffc97] rounded-tr-lg" />
                 <div className="absolute bottom-0 left-0 w-7 h-7 border-b-[3.5px] border-l-[3.5px] border-[#7ffc97] rounded-bl-lg" />
                 <div className="absolute bottom-0 right-0 w-7 h-7 border-b-[3.5px] border-r-[3.5px] border-[#7ffc97] rounded-br-lg" />
 
-                {/* Top Detection Pill */}
                 <div className="absolute -top-3.5 px-3 py-0.5 rounded-full bg-[#7ffc97] text-[#002109] text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 shadow">
                   <CheckCircle2 className="w-3 h-3" />
-                  <span>Etiqueta no foco</span>
+                  <span>{scanPausedNotice ? 'Bip Registrado' : 'Alinhe na moldura'}</span>
                 </div>
               </div>
 
               <div className="mt-4 max-w-xs px-3 py-1.5 rounded-xl bg-black/60 backdrop-blur-md text-center">
                 <p className="text-xs text-white/95 leading-snug">
-                  Alinhe o código <strong className="text-[#7ffc97]">EAN-13, EAN-8 ou Code 128</strong>{' '}
-                  dentro da moldura ou toque em Bipar.
+                  Suporta <strong className="text-[#7ffc97]">EAN-13, EAN-8, UPC, Code 128 e QR</strong>.
+                  {cameraStatus === 'active' && focusSupported
+                    ? ' Toque na tela para refocar.'
+                    : ''}
                 </p>
               </div>
             </div>
 
             {/* Bottom Detection Card & Controls */}
             <div className="relative z-20 flex flex-col gap-2.5">
-              {/* Not Found Warning Banner */}
               {notFoundAlert && (
                 <div className="rounded-xl bg-[#ffdad6] text-[#93000a] p-3 flex items-center justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-xs font-extrabold">Produto não cadastrado</p>
+                    <p className="text-xs font-extrabold">Produto ainda não cadastrado na loja</p>
                     <p className="font-mono text-xs truncate">Código: {notFoundAlert}</p>
+                    {externalPreview && (
+                      <p className="text-[11px] font-semibold text-[#005320] mt-0.5 flex items-center gap-1 truncate">
+                        <Sparkles className="w-3 h-3 shrink-0" />
+                        <span className="truncate">
+                          Identificado: {externalPreview.name}
+                        </span>
+                      </p>
+                    )}
                   </div>
                   <button
                     type="button"
                     onClick={() => onScanResolved(notFoundAlert, 'register')}
-                    className="px-3 py-2 rounded-lg bg-[#ba1a1a] text-white text-xs font-bold whitespace-nowrap shrink-0 hover:brightness-90 transition-all"
+                    className="px-3 py-2 rounded-lg bg-[#ba1a1a] text-white text-xs font-bold whitespace-nowrap shrink-0 hover:brightness-90 transition-all cursor-pointer"
                   >
                     Cadastrar Agora
                   </button>
@@ -380,39 +528,49 @@ export function ScannerScreen({
               <div className="rounded-xl bg-white/95 backdrop-blur-md p-3.5 text-[#131b2e] shadow-lg">
                 <div className="flex items-center justify-between text-xs mb-1">
                   <span className="font-bold uppercase tracking-wider text-[#434655]">
-                    Código Identificado
+                    Leitura Atual
                   </span>
                   <span
                     className={`font-bold px-2 py-0.5 rounded-md ${
-                      focusedProduct
-                        ? 'bg-[#dcfce7] text-[#006e2d]'
-                        : 'bg-[#fef3c7] text-[#b45309]'
+                      !focusedBarcode
+                        ? 'bg-[#eaedff] text-[#434655]'
+                        : focusedProduct
+                          ? 'bg-[#dcfce7] text-[#006e2d]'
+                          : 'bg-[#fef3c7] text-[#b45309]'
                     }`}
                   >
-                    {focusedProduct ? 'No Catálogo' : 'Não Cadastrado'}
+                    {!focusedBarcode
+                      ? 'Aguardando código'
+                      : focusedProduct
+                        ? 'No Catálogo'
+                        : 'Não Cadastrado'}
                   </span>
                 </div>
 
                 <div className="flex items-baseline justify-between gap-3">
                   <div className="min-w-0">
                     <p className="font-mono text-base font-extrabold tracking-wider text-[#131b2e]">
-                      {focusedBarcode}
+                      {focusedBarcode || '— — — — — — — —'}
                     </p>
                     <p className="text-xs text-[#434655] truncate">
                       {focusedProduct
                         ? focusedProduct.name
-                        : 'Toque em Bipar para cadastrar novo item'}
+                        : focusedBarcode
+                          ? externalPreview?.name || 'Toque em Cadastrar para preencher preço e estoque'
+                          : 'Aponte a câmera, use o leitor USB ou digite o código'}
                     </p>
                   </div>
 
-                  <div className="text-right shrink-0">
-                    <span className="text-[11px] text-[#434655] block">
-                      {focusedProduct ? 'Preço Varejo' : 'Ação'}
-                    </span>
-                    <span className="text-base font-extrabold text-[#006e2d] tabular-nums">
-                      {focusedProduct ? formatBRL(focusedProduct.price) : 'Novo'}
-                    </span>
-                  </div>
+                  {focusedBarcode && (
+                    <div className="text-right shrink-0">
+                      <span className="text-[11px] text-[#434655] block">
+                        {focusedProduct ? 'Preço Varejo' : 'Ação'}
+                      </span>
+                      <span className="text-base font-extrabold text-[#006e2d] tabular-nums">
+                        {focusedProduct ? formatBRL(focusedProduct.price) : 'Novo'}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -424,81 +582,129 @@ export function ScannerScreen({
                     setManualInput(focusedBarcode);
                     setShowManualModal(true);
                   }}
-                  className="flex-1 h-12 rounded-xl bg-white hover:bg-[#f2f3ff] text-[#131b2e] font-bold text-sm flex items-center justify-center gap-2 shadow active:scale-[0.98] transition-all"
+                  className="flex-1 h-12 rounded-xl bg-white hover:bg-[#f2f3ff] text-[#131b2e] font-bold text-sm flex items-center justify-center gap-2 shadow active:scale-[0.98] transition-all cursor-pointer"
                 >
                   <Keyboard className="w-4 h-4 text-[#2563eb]" />
                   <span>Digitar Código</span>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => processBarcode(focusedBarcode, true)}
-                  className={`h-12 px-6 rounded-xl text-white font-bold text-sm flex items-center justify-center gap-2 shadow active:scale-[0.98] transition-all ${
-                    mode === 'query'
-                      ? 'bg-[#2563eb] hover:bg-[#004ac6]'
-                      : 'bg-[#007b71] hover:bg-[#006058]'
-                  }`}
-                >
-                  <ScanLine className="w-4 h-4" />
-                  <span>{mode === 'query' ? 'Bipar' : 'Cadastrar'}</span>
-                </button>
+                {focusedBarcode && (
+                  <button
+                    type="button"
+                    onClick={() => processBarcode(focusedBarcode, true)}
+                    className={`h-12 px-6 rounded-xl text-white font-bold text-sm flex items-center justify-center gap-2 shadow active:scale-[0.98] transition-all cursor-pointer ${
+                      mode === 'query'
+                        ? 'bg-[#2563eb] hover:bg-[#004ac6]'
+                        : 'bg-[#007b71] hover:bg-[#006058]'
+                    }`}
+                  >
+                    <ScanLine className="w-4 h-4" />
+                    <span>{mode === 'query' ? 'Consultar' : 'Cadastrar'}</span>
+                  </button>
+                )}
               </div>
             </div>
           </div>
         </div>
 
-        {/* Right Column (5 cols on desktop, stacked below on mobile): Quick Test Barcodes & Direct Lookup */}
+        {/* Right Column (5 cols on desktop): USB/Bluetooth Scanner & Active Store Items */}
         <div className="lg:col-span-5 flex flex-col gap-4">
+          {/* USB / Bluetooth HID Direct Entry Card */}
+          <div className="bg-white rounded-2xl p-4 border border-[#e2e7ff] flex flex-col gap-3">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-[#eaedff] text-[#004ac6] flex items-center justify-center shrink-0">
+                <Usb className="w-4 h-4" />
+              </div>
+              <div>
+                <h2 className="text-sm font-bold text-[#131b2e]">
+                  Leitor USB / Bluetooth ou Entrada Rápida
+                </h2>
+                <p className="text-xs text-[#434655]">
+                  Bipe com o leitor externo em qualquer tela ou digite e pressione Enter.
+                </p>
+              </div>
+            </div>
+
+            <form onSubmit={handleUsbSubmit} className="flex items-center gap-2">
+              <input
+                ref={usbInputRef}
+                type="text"
+                inputMode="numeric"
+                value={usbQuickInput}
+                onChange={(e) => setUsbQuickInput(e.target.value)}
+                placeholder="Aguardando bip USB ou código..."
+                className="flex-1 h-11 px-3 rounded-xl bg-[#f2f3ff] border border-[#cbd5e1] focus:border-[#2563eb] focus:bg-white font-mono text-sm font-bold text-[#131b2e] outline-none"
+              />
+              <button
+                type="submit"
+                className="h-11 px-4 rounded-xl bg-[#2563eb] hover:bg-[#004ac6] text-white text-xs font-bold shrink-0 cursor-pointer"
+              >
+                Bipar
+              </button>
+            </form>
+          </div>
+
+          {/* Active Store Catalog Shortcuts (Real Store Data Only - Zero Seed) */}
           <div className="bg-white rounded-2xl p-4 border border-[#e2e7ff] flex flex-col gap-3">
             <div>
               <h2 className="text-base font-bold text-[#131b2e]">
-                Etiquetas Rápidas de Balcão
+                Itens Recentes desta Loja
               </h2>
               <p className="text-xs text-[#434655] mt-0.5">
-                Selecione um código de barras para posicionar no foco ou testar leitura instantânea sem webcam.
+                {storeQuickItems.length > 0
+                  ? 'Consulta instantânea sem latência a partir do catálogo local.'
+                  : 'Esta loja ainda não possui produtos cadastrados.'}
               </p>
             </div>
 
-            <div className="flex flex-col gap-2">
-              {DEMO_SHELF_CODES.map((preset) => {
-                const isSelected = focusedBarcode === preset.code;
-                const prod = products.find((p) => p.barcode === preset.code);
-                return (
-                  <div
-                    key={preset.code}
-                    className={`flex items-center justify-between gap-2 p-2.5 rounded-xl border transition-colors ${
-                      isSelected
-                        ? 'bg-[#f2f3ff] border-[#2563eb]'
-                        : 'bg-[#faf8ff] border-[#e2e7ff] hover:bg-[#f2f3ff]'
-                    }`}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setNotFoundAlert(null);
-                        setFocusedBarcode(preset.code);
-                      }}
-                      className="flex-1 text-left min-w-0 min-h-[40px]"
+            {storeQuickItems.length === 0 ? (
+              <div className="p-5 rounded-xl bg-[#f2f3ff] text-center flex flex-col items-center gap-2">
+                <PackageOpen className="w-7 h-7 text-[#434655]" />
+                <p className="text-xs text-[#434655] leading-relaxed">
+                  Bipe um produto novo no modo <strong>Cadastro</strong> ou digite o código acima para preencher nome, marca e foto automaticamente.
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {storeQuickItems.map((prod) => {
+                  const isSelected = focusedBarcode === prod.barcode;
+                  return (
+                    <div
+                      key={prod.barcode}
+                      className={`flex items-center justify-between gap-2 p-2.5 rounded-xl border transition-colors ${
+                        isSelected
+                          ? 'bg-[#f2f3ff] border-[#2563eb]'
+                          : 'bg-[#faf8ff] border-[#e2e7ff] hover:bg-[#f2f3ff]'
+                      }`}
                     >
-                      <p className="text-sm font-bold text-[#131b2e] truncate">
-                        {prod ? prod.name : preset.label}
-                      </p>
-                      <p className="font-mono text-xs text-[#434655]">
-                        {preset.code}
-                        {prod ? ` · ${formatBRL(prod.price)}` : ' · Não cadastrado'}
-                      </p>
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNotFoundAlert(null);
+                          setExternalPreview(null);
+                          setFocusedBarcode(prod.barcode);
+                        }}
+                        className="flex-1 text-left min-w-0 min-h-[40px] cursor-pointer"
+                      >
+                        <p className="text-sm font-bold text-[#131b2e] truncate">
+                          {prod.name}
+                        </p>
+                        <p className="font-mono text-xs text-[#434655]">
+                          {prod.barcode} · {formatBRL(prod.price)}
+                        </p>
+                      </button>
 
-                    <button
-                      type="button"
-                      onClick={() => processBarcode(preset.code, true)}
-                      className="px-3 py-2 rounded-lg bg-[#2563eb] hover:bg-[#004ac6] text-white text-xs font-bold whitespace-nowrap shrink-0 min-h-[38px]"
-                    >
-                      Bipar
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
+                      <button
+                        type="button"
+                        onClick={() => processBarcode(prod.barcode, true)}
+                        className="px-3 py-2 rounded-lg bg-[#2563eb] hover:bg-[#004ac6] text-white text-xs font-bold whitespace-nowrap shrink-0 min-h-[38px] cursor-pointer"
+                      >
+                        Abrir
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -522,7 +728,7 @@ export function ScannerScreen({
                     Inserir Código de Barras
                   </h2>
                   <p className="text-xs text-[#434655]">
-                    Digite os dígitos da etiqueta EAN-13 ou EAN-8
+                    Digite os dígitos EAN-13, EAN-8, UPC ou Code 128
                   </p>
                 </div>
               </div>
@@ -530,7 +736,7 @@ export function ScannerScreen({
                 type="button"
                 onClick={() => setShowManualModal(false)}
                 aria-label="Fechar"
-                className="w-9 h-9 rounded-full bg-[#eaedff] flex items-center justify-center text-[#434655] hover:text-[#131b2e]"
+                className="w-9 h-9 rounded-full bg-[#eaedff] flex items-center justify-center text-[#434655] hover:text-[#131b2e] cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -542,14 +748,14 @@ export function ScannerScreen({
                   htmlFor="barcode-manual-input"
                   className="text-xs font-bold text-[#434655] block mb-1"
                 >
-                  Número EAN / SKU
+                  Código de Barras / SKU
                 </label>
                 <div className="relative flex items-center">
                   <input
                     id="barcode-manual-input"
-                    type="tel"
+                    type="text"
                     inputMode="numeric"
-                    maxLength={14}
+                    maxLength={32}
                     autoFocus
                     value={manualInput}
                     onChange={(e) => setManualInput(e.target.value)}
@@ -560,29 +766,16 @@ export function ScannerScreen({
                     type="button"
                     onClick={() => setManualInput('')}
                     aria-label="Limpar código"
-                    className="absolute right-2.5 w-8 h-8 flex items-center justify-center text-[#434655] hover:text-[#131b2e]"
+                    className="absolute right-2.5 w-8 h-8 flex items-center justify-center text-[#434655] hover:text-[#131b2e] cursor-pointer"
                   >
                     <Delete className="w-4 h-4" />
                   </button>
                 </div>
               </div>
 
-              <div className="flex flex-wrap gap-1.5">
-                {DEMO_SHELF_CODES.slice(0, 3).map((preset) => (
-                  <button
-                    key={preset.code}
-                    type="button"
-                    onClick={() => setManualInput(preset.code)}
-                    className="px-2.5 py-1.5 rounded-lg bg-[#eaedff] hover:bg-[#dae2fd] text-[#131b2e] font-mono text-[11px] font-semibold"
-                  >
-                    {preset.code}
-                  </button>
-                ))}
-              </div>
-
               <button
                 type="submit"
-                className="w-full h-12 rounded-xl bg-[#2563eb] hover:bg-[#004ac6] text-white font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-all"
+                className="w-full h-12 rounded-xl bg-[#2563eb] hover:bg-[#004ac6] text-white font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-all cursor-pointer"
               >
                 <Check className="w-4 h-4" />
                 <span>
