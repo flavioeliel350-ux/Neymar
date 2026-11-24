@@ -1,4 +1,5 @@
 import rawFirebaseConfig from '../../firebase-applet-config.json';
+import packageJson from '../../package.json';
 
 /**
  * ============================================================================
@@ -9,7 +10,7 @@ import rawFirebaseConfig from '../../firebase-applet-config.json';
  * públicas do cliente Firebase (Auth + Firestore).
  */
 
-export const APP_VERSION = '1.0.0';
+export const APP_VERSION = String(packageJson.version || '1.0.0').trim();
 
 export interface GitHubConfig {
   /** Usuário ou organização dona do repositório no GitHub (ex: "minha-loja") */
@@ -28,12 +29,17 @@ const env = (typeof import.meta !== 'undefined' && import.meta.env)
   ? (import.meta.env as Record<string, string | undefined>)
   : {};
 
+const envRepoFull = (env.VITE_GITHUB_REPOSITORY || '').trim();
+const [envFullOwner = '', envFullRepo = ''] = envRepoFull.includes('/')
+  ? envRepoFull.split('/', 2)
+  : ['', ''];
+
 export const GITHUB_CONFIG: GitHubConfig = {
-  owner: (env.VITE_GITHUB_OWNER || '').trim(),
-  repo: (env.VITE_GITHUB_REPO || '').trim(),
+  owner: (env.VITE_GITHUB_OWNER || envFullOwner || '').trim(),
+  repo: (env.VITE_GITHUB_REPO || envFullRepo || '').trim(),
   branch: (env.VITE_GITHUB_BRANCH || 'main').trim() || 'main',
   autoCheckIntervalMs: 6 * 60 * 60 * 1000,
-  requestTimeoutMs: 5000,
+  requestTimeoutMs: 6500,
 };
 
 export interface FirebaseClientConfig {

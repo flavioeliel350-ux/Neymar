@@ -5,7 +5,12 @@ on:
     branches:
       - main
       - master
+    tags:
+      - 'v*'
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build-android-apk:
@@ -42,7 +47,10 @@ jobs:
       - name: Instalar dependências npm
         run: npm install --legacy-peer-deps
 
-      - name: Compilar bundle web (Vite)
+      - name: Compilar bundle web (Vite) com repositório GitHub vinculado
+        env:
+          VITE_GITHUB_REPOSITORY: ${{ github.repository }}
+          VITE_GITHUB_BRANCH: ${{ github.ref_name }}
         run: npm run build
 
       - name: Sincronizar Capacitor Android
@@ -66,3 +74,10 @@ jobs:
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
+
+      - name: Anexar APK à Release do GitHub (quando houver tag v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: android/app/build/outputs/apk/debug/app-debug.apk
+          generate_release_notes: true

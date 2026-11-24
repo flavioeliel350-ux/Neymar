@@ -113,11 +113,15 @@ export default function App() {
     throw fatalError;
   }
 
-  const runUpdateCheck = useCallback(async (force = false) => {
+  const runUpdateCheck = useCallback(async (force = false): Promise<UpdateCheckResult> => {
     setCheckingUpdates(true);
+    if (force) {
+      setDismissedUpdateVersion(null);
+    }
     try {
       const result = await checkForGitHubUpdate(force);
       setUpdateInfo(result);
+      return result;
     } finally {
       setCheckingUpdates(false);
     }

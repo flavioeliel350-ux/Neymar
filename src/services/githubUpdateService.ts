@@ -28,16 +28,50 @@ interface GitHubReleaseResponse {
   assets?: GitHubReleaseAsset[];
 }
 
+/**
+ * Aceita "owner", "owner/repo", ou URL completa "https://github.com/owner/repo"
+ * e normaliza em { owner, repo }.
+ */
+export function parseGitHubRepoInput(
+  ownerOrUrl: string,
+  repoInput = '',
+): { owner: string; repo: string } {
+  const rawFirst = ownerOrUrl.trim().replace(/\.git$/i, '').replace(/\/+$/, '');
+  const rawSecond = repoInput.trim().replace(/^\/+|\/+$/g, '');
+
+  const ghUrlMatch = rawFirst.match(/github\.com\/([^/\s]+)\/([^/\s]+)/i);
+  if (ghUrlMatch) {
+    return {
+      owner: ghUrlMatch[1].trim(),
+      repo: ghUrlMatch[2].trim(),
+    };
+  }
+
+  if (rawFirst.includes('/')) {
+    const parts = rawFirst.split('/').filter(Boolean);
+    if (parts.length >= 2) {
+      return {
+        owner: parts[0].trim(),
+        repo: parts[1].trim(),
+      };
+    }
+  }
+
+  return {
+    owner: rawFirst.replace(/^@/, ''),
+    repo: rawSecond,
+  };
+}
+
 export function getEffectiveGitHubRepo(): GitHubRepoOverride {
   try {
     const raw = localStorage.getItem(LS_GITHUB_REPO_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<GitHubRepoOverride>;
-      const owner = (parsed.owner || '').trim();
-      const repo = (parsed.repo || '').trim();
+      const normalized = parseGitHubRepoInput(parsed.owner || '', parsed.repo || '');
       const branch = (parsed.branch || '').trim() || GITHUB_CONFIG.branch;
-      if (owner && repo) {
-        return { owner, repo, branch };
+      if (normalized.owner && normalized.repo) {
+        return { owner: normalized.owner, repo: normalized.repo, branch };
       }
     }
   } catch {
@@ -52,14 +86,20 @@ export function getEffectiveGitHubRepo(): GitHubRepoOverride {
 
 export function saveGitHubRepoOverride(config: GitHubRepoOverride | null): void {
   try {
-    if (!config || !config.owner.trim() || !config.repo.trim()) {
+    if (!config) {
+      localStorage.removeItem(LS_GITHUB_REPO_KEY);
+      localStorage.removeItem(LS_UPDATE_CACHE_KEY);
+      return;
+    }
+    const parsed = parseGitHubRepoInput(config.owner, config.repo);
+    if (!parsed.owner || !parsed.repo) {
       localStorage.removeItem(LS_GITHUB_REPO_KEY);
     } else {
       localStorage.setItem(
         LS_GITHUB_REPO_KEY,
         JSON.stringify({
-          owner: config.owner.trim(),
-          repo: config.repo.trim(),
+          owner: parsed.owner,
+          repo: parsed.repo,
           branch: config.branch.trim() || 'main',
         }),
       );
@@ -92,13 +132,44 @@ export function compareSemver(aRaw: string, bRaw: string): number {
   return 0;
 }
 
-async function fetchWithTimeout(url: string, accept = 'application/vnd.github+json'): Promise<Response> {
+function prioritizePlatformAssets(assets: UpdateDownloadAsset[]): UpdateDownloadAsset[] {
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent.toLowerCase() : '';
+  const isAndroid = ua.includes('android');
+  const isWindows = ua.includes('windows');
+
+  return [...assets].sort((a, b) => {
+    const an = a.name.toLowerCase();
+    const bn = b.name.toLowerCase();
+    if (isAndroid) {
+      const aApk = an.endsWith('.apk') ? 1 : 0;
+      const bApk = bn.endsWith('.apk') ? 1 : 0;
+      if (aApk !== bApk) return bApk - aApk;
+    }
+    if (isWindows) {
+      const aExe = an.endsWith('.exe') ? 1 : 0;
+      const bExe = bn.endsWith('.exe') ? 1 : 0;
+      if (aExe !== bExe) return bExe - aExe;
+    }
+    return 0;
+  });
+}
+
+async function fetchWithTimeout(
+  url: string,
+  accept = 'application/vnd.github+json',
+  bypassCache = false,
+): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), GITHUB_CONFIG.requestTimeoutMs);
+  const finalUrl = bypassCache
+    ? `${url}${url.includes('?') ? '&' : '?'}_t=${Date.now()}`
+    : url;
+
   try {
-    return await fetch(url, {
+    return await fetch(finalUrl, {
       method: 'GET',
       signal: controller.signal,
+      cache: bypassCache ? 'no-store' : 'default',
       headers: { Accept: accept },
     });
   } finally {
@@ -110,6 +181,7 @@ async function fetchFallbackManifestVersion(
   owner: string,
   repo: string,
   branch: string,
+  bypassCache: boolean,
 ): Promise<{ version: string; releaseUrl: string; notes?: string } | null> {
   const candidates = [
     `https://raw.githubusercontent.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${encodeURIComponent(branch)}/version.json`,
@@ -118,7 +190,7 @@ async function fetchFallbackManifestVersion(
 
   for (const url of candidates) {
     try {
-      const res = await fetchWithTimeout(url, 'application/json');
+      const res = await fetchWithTimeout(url, 'application/json', bypassCache);
       if (!res.ok) continue;
       const data = (await res.json()) as { version?: string; notes?: string };
       if (data?.version && /\d+\.\d+\.\d+/.test(data.version)) {
@@ -145,7 +217,7 @@ export async function checkForGitHubUpdate(force = false): Promise<UpdateCheckRe
       currentVersion: APP_VERSION,
       checkedAt: nowIso,
       message:
-        'Repositório GitHub não configurado. Informe usuário/repositório nas configurações para ativar a verificação.',
+        'Repositório GitHub não vinculado ainda. Informe seu usuário/repositório abaixo para verificar novas versões.',
     };
   }
 
@@ -184,7 +256,7 @@ export async function checkForGitHubUpdate(force = false): Promise<UpdateCheckRe
   )}/${encodeURIComponent(repoCfg.repo)}/releases/latest`;
 
   try {
-    const res = await fetchWithTimeout(releasesUrl);
+    const res = await fetchWithTimeout(releasesUrl, 'application/vnd.github+json', force);
 
     if (res.status === 403 || res.status === 429) {
       appLogger.warn('GitHubUpdate', 'Limite de requisições da API do GitHub atingido.');
@@ -214,13 +286,15 @@ export async function checkForGitHubUpdate(force = false): Promise<UpdateCheckRe
         releaseUrl = json.html_url || releaseUrl;
         publishedAt = json.published_at;
         if (Array.isArray(json.assets)) {
-          assets = json.assets
-            .filter((a) => a.name && a.browser_download_url)
-            .slice(0, 4)
-            .map((a) => ({
-              name: String(a.name),
-              url: String(a.browser_download_url),
-            }));
+          assets = prioritizePlatformAssets(
+            json.assets
+              .filter((a) => a.name && a.browser_download_url)
+              .slice(0, 6)
+              .map((a) => ({
+                name: String(a.name),
+                url: String(a.browser_download_url),
+              })),
+          );
         }
       }
     }
@@ -230,6 +304,7 @@ export async function checkForGitHubUpdate(force = false): Promise<UpdateCheckRe
         repoCfg.owner,
         repoCfg.repo,
         repoCfg.branch,
+        force,
       );
       if (fallback) {
         latestVersion = fallback.version;
@@ -246,7 +321,8 @@ export async function checkForGitHubUpdate(force = false): Promise<UpdateCheckRe
         releaseUrl,
         checkedAt: nowIso,
         message:
-          'Não foi possível localizar releases públicas para este repositório (verifique se ele é público ou se há versão publicada).',
+          'Não foi possível localizar releases ou package.json público em ' +
+          `${repoCfg.owner}/${repoCfg.repo} (branch ${repoCfg.branch}). Verifique se o repositório é público.`,
       };
     }
 
@@ -262,7 +338,7 @@ export async function checkForGitHubUpdate(force = false): Promise<UpdateCheckRe
           publishedAt,
           assets,
           checkedAt: nowIso,
-          message: `Nova versão v${latestVersion} disponível no GitHub!`,
+          message: `Nova versão v${latestVersion} disponível no GitHub! (Instalada: v${APP_VERSION})`,
         }
       : {
           status: 'up_to_date',

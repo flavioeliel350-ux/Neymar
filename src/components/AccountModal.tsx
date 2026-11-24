@@ -43,6 +43,7 @@ import {
 } from '../firebase';
 import {
   getEffectiveGitHubRepo,
+  parseGitHubRepoInput,
   saveGitHubRepoOverride,
 } from '../services/githubUpdateService';
 import {
@@ -98,7 +99,7 @@ interface AccountModalProps {
   onSyncLocalAccountToCloud: (localAccountId: string) => Promise<number>;
   updateInfo: UpdateCheckResult | null;
   checkingUpdates: boolean;
-  onCheckUpdates: (force?: boolean) => Promise<void>;
+  onCheckUpdates: (force?: boolean) => Promise<UpdateCheckResult | void>;
 }
 
 export function AccountModal({
@@ -189,6 +190,7 @@ export function AccountModal({
   const [ghOwnerInput, setGhOwnerInput] = useState(initialRepo.owner);
   const [ghRepoInput, setGhRepoInput] = useState(initialRepo.repo);
   const [ghBranchInput, setGhBranchInput] = useState(initialRepo.branch);
+  const [ghFormError, setGhFormError] = useState<string | null>(null);
 
   const envInfo = useMemo(() => detectAuthEnvironment(), []);
   const isManager = activeOperator?.role === 'manager';
@@ -1542,23 +1544,53 @@ export function AccountModal({
     </div>
   );
 
+  const openGitHubRepoEditor = () => {
+    const curr = getEffectiveGitHubRepo();
+    setGhOwnerInput(curr.owner);
+    setGhRepoInput(curr.repo);
+    setGhBranchInput(curr.branch || 'main');
+    setGhFormError(null);
+    setEditingGitHubRepo(true);
+  };
+
+  const handleManualCheckUpdates = async () => {
+    const curr = getEffectiveGitHubRepo();
+    const res = await onCheckUpdates(true);
+    if ((!curr.owner || !curr.repo) || res?.status === 'not_configured') {
+      if (isManager || syncMode === 'none') {
+        openGitHubRepoEditor();
+      }
+    }
+  };
+
   const handleSaveGitHubRepo = async (e: React.FormEvent) => {
     e.preventDefault();
+    const parsed = parseGitHubRepoInput(ghOwnerInput, ghRepoInput);
+    if (!parsed.owner || !parsed.repo) {
+      setGhFormError(
+        'Informe usuário e repositório (ex: "seu-usuario" e "prontopreco", ou cole a URL do GitHub).',
+      );
+      return;
+    }
+    setGhFormError(null);
     saveGitHubRepoOverride({
-      owner: ghOwnerInput,
-      repo: ghRepoInput,
-      branch: ghBranchInput || 'main',
+      owner: parsed.owner,
+      repo: parsed.repo,
+      branch: ghBranchInput.trim() || 'main',
     });
+    setGhOwnerInput(parsed.owner);
+    setGhRepoInput(parsed.repo);
     setEditingGitHubRepo(false);
     await onCheckUpdates(true);
   };
 
   const renderUpdatesAndAboutCard = () => {
     const repoCfg = getEffectiveGitHubRepo();
-    const repoLabel =
-      repoCfg.owner && repoCfg.repo
-        ? `${repoCfg.owner}/${repoCfg.repo}`
-        : 'Não configurado';
+    const hasConfiguredRepo = Boolean(repoCfg.owner && repoCfg.repo);
+    const repoLabel = hasConfiguredRepo
+      ? `${repoCfg.owner}/${repoCfg.repo}`
+      : 'Não configurado';
+    const canConfigureRepo = isManager || syncMode === 'none';
 
     return (
       <div className="bg-white rounded-2xl border border-[#e2e7ff] p-4 flex flex-col gap-3">
@@ -1578,7 +1610,7 @@ export function AccountModal({
           <button
             type="button"
             disabled={checkingUpdates}
-            onClick={() => void onCheckUpdates(true)}
+            onClick={() => void handleManualCheckUpdates()}
             className="h-9 px-3 rounded-lg bg-[#eaedff] hover:bg-[#dae2fd] disabled:opacity-60 text-[#004ac6] text-xs font-bold flex items-center gap-1.5 shrink-0 cursor-pointer"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${checkingUpdates ? 'animate-spin' : ''}`} />
@@ -1593,7 +1625,9 @@ export function AccountModal({
                 ? 'bg-[#eaedff] text-[#131b2e] border border-[#b4c5ff]'
                 : updateInfo.status === 'up_to_date'
                   ? 'bg-[#dcfce7] text-[#005320]'
-                  : 'bg-[#f2f3ff] text-[#434655]'
+                  : updateInfo.status === 'not_configured'
+                    ? 'bg-[#fef3c7] text-[#92400e] border border-[#f59e0b]/40'
+                    : 'bg-[#f2f3ff] text-[#434655]'
             }`}
           >
             <div className="flex items-start gap-2 font-bold">
@@ -1602,6 +1636,25 @@ export function AccountModal({
               )}
               <span>{updateInfo.message}</span>
             </div>
+
+            {updateInfo.status === 'not_configured' && !editingGitHubRepo && (
+              <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                {canConfigureRepo ? (
+                  <button
+                    type="button"
+                    onClick={openGitHubRepoEditor}
+                    className="px-3 py-1.5 rounded-lg bg-[#92400e] text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <GitBranch className="w-3.5 h-3.5" />
+                    <span>Vincular Repositório GitHub</span>
+                  </button>
+                ) : (
+                  <span className="text-[11px] font-medium">
+                    Peça ao Gerente para vincular o repositório GitHub da loja.
+                  </span>
+                )}
+              </div>
+            )}
 
             {updateInfo.status === 'update_available' && updateInfo.releaseNotes && (
               <p className="text-[11px] text-[#434655] line-clamp-3 whitespace-pre-wrap">
@@ -1633,53 +1686,72 @@ export function AccountModal({
                 </a>
               </div>
             )}
+
+            {(updateInfo.status === 'unavailable' || updateInfo.status === 'rate_limited') &&
+              updateInfo.releaseUrl && (
+                <a
+                  href={updateInfo.releaseUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="self-start px-3 py-1.5 rounded-lg bg-white hover:bg-[#eaedff] text-[#004ac6] border border-[#cbd5e1] text-xs font-bold inline-flex items-center gap-1.5"
+                >
+                  <span>Abrir Releases / Actions no GitHub</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              )}
           </div>
         )}
 
-        {(isManager || syncMode === 'none') && (
+        {canConfigureRepo && (
           !editingGitHubRepo ? (
             <button
               type="button"
-              onClick={() => {
-                const curr = getEffectiveGitHubRepo();
-                setGhOwnerInput(curr.owner);
-                setGhRepoInput(curr.repo);
-                setGhBranchInput(curr.branch);
-                setEditingGitHubRepo(true);
-              }}
+              onClick={openGitHubRepoEditor}
               className="self-start text-[11px] font-bold text-[#004ac6] hover:underline flex items-center gap-1 cursor-pointer"
             >
               <GitBranch className="w-3.5 h-3.5" />
               <span>
-                {repoCfg.owner && repoCfg.repo
+                {hasConfiguredRepo
                   ? 'Alterar repositório GitHub'
                   : 'Configurar repositório GitHub (owner/repo)'}
               </span>
             </button>
           ) : (
             <form onSubmit={(e) => void handleSaveGitHubRepo(e)} className="flex flex-col gap-2 pt-1">
+              <p className="text-[11px] text-[#434655]">
+                Digite usuário + repositório ou cole o link completo (ex: <code className="font-mono">usuario/prontopreco</code>).
+              </p>
               <div className="grid grid-cols-2 gap-2">
                 <input
                   type="text"
                   value={ghOwnerInput}
-                  onChange={(e) => setGhOwnerInput(e.target.value)}
-                  placeholder="Usuário/Org (owner)"
+                  onChange={(e) => {
+                    setGhFormError(null);
+                    setGhOwnerInput(e.target.value);
+                  }}
+                  placeholder="Usuário ou usuario/repo"
                   className="h-9 px-2.5 rounded-lg bg-[#f2f3ff] border border-[#cbd5e1] text-xs font-semibold text-[#131b2e] outline-none"
                 />
                 <input
                   type="text"
                   value={ghRepoInput}
-                  onChange={(e) => setGhRepoInput(e.target.value)}
-                  placeholder="Nome do repo"
+                  onChange={(e) => {
+                    setGhFormError(null);
+                    setGhRepoInput(e.target.value);
+                  }}
+                  placeholder="Nome do repo (opcional se colou link)"
                   className="h-9 px-2.5 rounded-lg bg-[#f2f3ff] border border-[#cbd5e1] text-xs font-semibold text-[#131b2e] outline-none"
                 />
               </div>
+              {ghFormError && (
+                <p className="text-xs font-bold text-[#ba1a1a]">{ghFormError}</p>
+              )}
               <div className="flex items-center gap-2">
                 <input
                   type="text"
                   value={ghBranchInput}
                   onChange={(e) => setGhBranchInput(e.target.value)}
-                  placeholder="Branch (ex: main)"
+                  placeholder="Branch (main)"
                   className="w-28 h-9 px-2.5 rounded-lg bg-[#f2f3ff] border border-[#cbd5e1] text-xs font-semibold text-[#131b2e] outline-none"
                 />
                 <button
@@ -1690,7 +1762,10 @@ export function AccountModal({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setEditingGitHubRepo(false)}
+                  onClick={() => {
+                    setEditingGitHubRepo(false);
+                    setGhFormError(null);
+                  }}
                   className="h-9 px-2.5 rounded-lg bg-[#eaedff] text-[#434655] text-xs font-bold cursor-pointer"
                 >
                   Cancelar

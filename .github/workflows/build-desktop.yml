@@ -5,7 +5,12 @@ on:
     branches:
       - main
       - master
+    tags:
+      - 'v*'
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build-windows-exe:
@@ -24,7 +29,10 @@ jobs:
       - name: Instalar dependências do app web
         run: npm install --legacy-peer-deps
 
-      - name: Compilar bundle web (Vite)
+      - name: Compilar bundle web (Vite) com repositório GitHub vinculado
+        env:
+          VITE_GITHUB_REPOSITORY: ${{ github.repository }}
+          VITE_GITHUB_BRANCH: ${{ github.ref_name }}
         run: npm run build
 
       - name: Copiar bundle compilado para desktop/dist
@@ -49,3 +57,12 @@ jobs:
             desktop/release/ProntoPreco-Portatil-Windows.exe
           if-no-files-found: error
           retention-days: 30
+
+      - name: Anexar .exe à Release do GitHub (quando houver tag v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            desktop/release/ProntoPreco-Instalador-Windows.exe
+            desktop/release/ProntoPreco-Portatil-Windows.exe
+          generate_release_notes: true
