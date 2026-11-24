@@ -1,5 +1,7 @@
-const { app, BrowserWindow, session, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, session, shell } = require('electron');
+const { spawn } = require('child_process');
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
@@ -25,6 +27,115 @@ const MIME_TYPES = {
 
 let mainWindow = null;
 let localServer = null;
+let updateDownloadActive = false;
+
+function isAllowedGitHubDownloadUrl(rawUrl) {
+  try {
+    const parsed = new URL(String(rawUrl || '').trim());
+    if (parsed.protocol !== 'https:') return false;
+    const host = parsed.hostname.toLowerCase();
+    return (
+      host === 'github.com' ||
+      host.endsWith('.github.com') ||
+      host === 'githubusercontent.com' ||
+      host.endsWith('.githubusercontent.com')
+    );
+  } catch {
+    return false;
+  }
+}
+
+function sendUpdateProgress(payload) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('prontopreco:update-progress', payload);
+  }
+}
+
+function downloadFileWithRedirects(targetUrl, destPartPath, onProgress, redirectsLeft = 6) {
+  return new Promise((resolve, reject) => {
+    if (!isAllowedGitHubDownloadUrl(targetUrl)) {
+      reject(new Error('URL de atualização não autorizada.'));
+      return;
+    }
+
+    const req = https.get(
+      targetUrl,
+      {
+        headers: {
+          'User-Agent': 'ProntoPreco-DesktopUpdater',
+        },
+        timeout: 30000,
+      },
+      (res) => {
+        const status = res.statusCode || 0;
+        if (
+          (status === 301 || status === 302 || status === 303 || status === 307 || status === 308) &&
+          res.headers.location
+        ) {
+          res.resume();
+          if (redirectsLeft <= 0) {
+            reject(new Error('Excesso de redirecionamentos ao baixar atualização.'));
+            return;
+          }
+          const nextUrl = new URL(res.headers.location, targetUrl).toString();
+          downloadFileWithRedirects(nextUrl, destPartPath, onProgress, redirectsLeft - 1)
+            .then(resolve)
+            .catch(reject);
+          return;
+        }
+
+        if (status < 200 || status >= 300) {
+          res.resume();
+          reject(new Error(`Falha ao baixar atualização (HTTP ${status}).`));
+          return;
+        }
+
+        const totalBytes = parseInt(res.headers['content-length'] || '0', 10) || 0;
+        let receivedBytes = 0;
+        let lastReportMs = 0;
+
+        const outStream = fs.createWriteStream(destPartPath);
+
+        res.on('data', (chunk) => {
+          receivedBytes += chunk.length;
+          const now = Date.now();
+          if (now - lastReportMs >= 150) {
+            lastReportMs = now;
+            const percent =
+              totalBytes > 0 ? Math.min(99, Math.round((receivedBytes * 100) / totalBytes)) : 0;
+            onProgress({ receivedBytes, totalBytes, percent });
+          }
+        });
+
+        res.pipe(outStream);
+
+        outStream.on('finish', () => {
+          outStream.close(() => resolve({ receivedBytes, totalBytes }));
+        });
+
+        outStream.on('error', (err) => {
+          fs.rmSync(destPartPath, { force: true });
+          reject(err);
+        });
+
+        res.on('error', (err) => {
+          outStream.destroy();
+          fs.rmSync(destPartPath, { force: true });
+          reject(err);
+        });
+      },
+    );
+
+    req.on('timeout', () => {
+      req.destroy(new Error('Tempo limite excedido durante o download da atualização.'));
+    });
+
+    req.on('error', (err) => {
+      fs.rmSync(destPartPath, { force: true });
+      reject(err);
+    });
+  });
+}
 
 function startStaticServer() {
   return new Promise((resolve, reject) => {
@@ -153,6 +264,106 @@ if (!gotSingleInstanceLock) {
         callback(false);
       },
     );
+
+    ipcMain.handle('prontopreco:get-env', () => ({
+      isDesktop: true,
+      platform: process.platform,
+      isPortable: Boolean(process.env.PORTABLE_EXECUTABLE_FILE),
+      version: app.getVersion(),
+    }));
+
+    ipcMain.handle('prontopreco:install-update', async (_event, payload) => {
+      if (updateDownloadActive) {
+        return { ok: false, message: 'Já existe um download de atualização em andamento.' };
+      }
+
+      const rawUrl = payload && typeof payload.url === 'string' ? payload.url : '';
+      const rawName = payload && typeof payload.fileName === 'string' ? payload.fileName : '';
+
+      if (!isAllowedGitHubDownloadUrl(rawUrl)) {
+        const msg = 'Endereço de download inválido.';
+        sendUpdateProgress({ stage: 'error', percent: 0, message: msg });
+        return { ok: false, message: msg };
+      }
+
+      const safeBaseName = path
+        .basename(rawName || 'ProntoPreco-Update.exe')
+        .replace(/[^a-zA-Z0-9._-]/g, '_');
+
+      if (!safeBaseName.toLowerCase().endsWith('.exe')) {
+        const msg = 'Formato de instalador incompatível para atualização automática no Windows.';
+        sendUpdateProgress({ stage: 'error', percent: 0, message: msg });
+        return { ok: false, message: msg };
+      }
+
+      updateDownloadActive = true;
+      const destPath = path.join(app.getPath('temp'), safeBaseName);
+      const partPath = `${destPath}.part`;
+
+      try {
+        sendUpdateProgress({
+          stage: 'downloading',
+          percent: 0,
+          receivedBytes: 0,
+          totalBytes: 0,
+          message: `Baixando ${safeBaseName}...`,
+        });
+
+        const { receivedBytes, totalBytes } = await downloadFileWithRedirects(
+          rawUrl,
+          partPath,
+          ({ receivedBytes: r, totalBytes: t, percent }) => {
+            sendUpdateProgress({
+              stage: 'downloading',
+              percent,
+              receivedBytes: r,
+              totalBytes: t,
+              message: `Baixando ${safeBaseName}...`,
+            });
+          },
+        );
+
+        if (fs.existsSync(destPath)) {
+          fs.rmSync(destPath, { force: true });
+        }
+        fs.renameSync(partPath, destPath);
+
+        const stats = fs.statSync(destPath);
+        if (stats.size < 500000) {
+          throw new Error('O arquivo baixado parece corrompido ou incompleto.');
+        }
+
+        sendUpdateProgress({
+          stage: 'installing',
+          percent: 100,
+          receivedBytes: stats.size,
+          totalBytes: totalBytes || receivedBytes || stats.size,
+          message: 'Download concluído! Executando instalador e reiniciando o ProntoPreço...',
+        });
+
+        const child = spawn(destPath, [], {
+          detached: true,
+          stdio: 'ignore',
+        });
+        child.unref();
+
+        setTimeout(() => {
+          app.quit();
+        }, 650);
+
+        return { ok: true };
+      } catch (err) {
+        fs.rmSync(partPath, { force: true });
+        const msg =
+          err instanceof Error
+            ? err.message
+            : 'Falha ao baixar ou iniciar a atualização.';
+        sendUpdateProgress({ stage: 'error', percent: 0, message: msg });
+        return { ok: false, message: msg };
+      } finally {
+        updateDownloadActive = false;
+      }
+    });
 
     const { server, port } = await startStaticServer();
     localServer = server;

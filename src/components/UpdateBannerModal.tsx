@@ -1,17 +1,37 @@
 import React, { useState } from 'react';
-import { Download, ExternalLink, Sparkles, X } from 'lucide-react';
-import { UpdateCheckResult } from '../types/product';
+import {
+  Download,
+  ExternalLink,
+  Loader2,
+  RefreshCw,
+  Sparkles,
+  X,
+} from 'lucide-react';
+import {
+  InAppUpdateState,
+  UpdateCheckResult,
+  UpdateDownloadAsset,
+} from '../types/product';
+import { InAppUpdateProgress } from './InAppUpdateProgress';
 
 interface UpdateBannerModalProps {
   updateInfo: UpdateCheckResult | null;
   dismissedVersion: string | null;
   onDismiss: (version: string) => void;
+  inAppUpdateState: InAppUpdateState;
+  onStartInAppUpdate: (preferredAsset?: UpdateDownloadAsset) => void;
+  onOpenAndroidInstallSettings: () => void;
+  onInstallCachedAndroidApk: () => void;
 }
 
 export function UpdateBannerModal({
   updateInfo,
   dismissedVersion,
   onDismiss,
+  inAppUpdateState,
+  onStartInAppUpdate,
+  onOpenAndroidInstallSettings,
+  onInstallCachedAndroidApk,
 }: UpdateBannerModalProps) {
   const [modalOpen, setModalOpen] = useState(false);
 
@@ -24,8 +44,17 @@ export function UpdateBannerModal({
     return null;
   }
 
-  const primaryDownloadUrl =
-    updateInfo.assets?.[0]?.url || updateInfo.releaseUrl || '#';
+  const isUpdatingNow =
+    inAppUpdateState.stage === 'downloading' ||
+    inAppUpdateState.stage === 'installing' ||
+    inAppUpdateState.stage === 'reloading_web';
+
+  const handleBannerPrimaryClick = () => {
+    setModalOpen(true);
+    if (inAppUpdateState.stage === 'idle' || inAppUpdateState.stage === 'error') {
+      onStartInAppUpdate();
+    }
+  };
 
   return (
     <>
@@ -34,15 +63,29 @@ export function UpdateBannerModal({
         <div className="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
             <span className="w-6 h-6 rounded-md bg-[#2563eb] text-white flex items-center justify-center shrink-0">
-              <Sparkles className="w-3.5 h-3.5" />
+              {isUpdatingNow ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="w-3.5 h-3.5" />
+              )}
             </span>
             <p className="text-xs font-bold text-[#131b2e] truncate">
-              Nova versão{' '}
-              <span className="text-[#004ac6]">v{updateInfo.latestVersion}</span>{' '}
-              disponível{' '}
-              <span className="hidden sm:inline font-medium text-[#434655]">
-                (atual: v{updateInfo.currentVersion})
-              </span>
+              {isUpdatingNow ? (
+                <span>
+                  Atualizando para{' '}
+                  <span className="text-[#004ac6]">v{updateInfo.latestVersion}</span> ·{' '}
+                  {inAppUpdateState.percent}%
+                </span>
+              ) : (
+                <>
+                  Nova versão{' '}
+                  <span className="text-[#004ac6]">v{updateInfo.latestVersion}</span>{' '}
+                  disponível{' '}
+                  <span className="hidden sm:inline font-medium text-[#434655]">
+                    (atual: v{updateInfo.currentVersion})
+                  </span>
+                </>
+              )}
             </p>
           </div>
 
@@ -52,17 +95,25 @@ export function UpdateBannerModal({
               onClick={() => setModalOpen(true)}
               className="px-2.5 py-1 rounded-lg bg-white hover:bg-[#f2f3ff] text-[#131b2e] text-xs font-bold border border-[#cbd5e1] cursor-pointer"
             >
-              Ver Novidades
+              {isUpdatingNow ? 'Ver Progresso' : 'Ver Novidades'}
             </button>
-            <a
-              href={primaryDownloadUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-2.5 py-1 rounded-lg bg-[#2563eb] hover:bg-[#004ac6] text-white text-xs font-bold inline-flex items-center gap-1"
+
+            <button
+              type="button"
+              onClick={handleBannerPrimaryClick}
+              disabled={isUpdatingNow}
+              className="px-2.5 py-1 rounded-lg bg-[#2563eb] hover:bg-[#004ac6] disabled:opacity-70 text-white text-xs font-bold inline-flex items-center gap-1 cursor-pointer"
             >
-              <Download className="w-3.5 h-3.5" />
-              <span>Baixar</span>
-            </a>
+              {isUpdatingNow ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : inAppUpdateState.platform === 'web' ? (
+                <RefreshCw className="w-3.5 h-3.5" />
+              ) : (
+                <Download className="w-3.5 h-3.5" />
+              )}
+              <span>{isUpdatingNow ? `${inAppUpdateState.percent}%` : 'Atualizar'}</span>
+            </button>
+
             <button
               type="button"
               aria-label="Dispensar aviso de atualização"
@@ -75,7 +126,7 @@ export function UpdateBannerModal({
         </div>
       </div>
 
-      {/* Release Notes & Download Modal */}
+      {/* Release Notes & In-App Update Modal */}
       {modalOpen && (
         <div
           role="dialog"
@@ -83,7 +134,7 @@ export function UpdateBannerModal({
           aria-label="Detalhes da Atualização"
           className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[#131b2e]/50 backdrop-blur-xs p-0 sm:p-4"
         >
-          <div className="w-full sm:max-w-md bg-white rounded-t-2xl sm:rounded-2xl border border-[#e2e7ff] shadow-xl p-5 flex flex-col gap-4">
+          <div className="w-full sm:max-w-md bg-white rounded-t-2xl sm:rounded-2xl border border-[#e2e7ff] shadow-xl p-5 flex flex-col gap-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-2.5">
                 <div className="w-10 h-10 rounded-xl bg-[#eaedff] text-[#004ac6] flex items-center justify-center shrink-0">
@@ -114,28 +165,55 @@ export function UpdateBannerModal({
               </p>
             )}
 
-            <div className="rounded-xl bg-[#f2f3ff] p-3 text-xs text-[#434655] max-h-48 overflow-y-auto whitespace-pre-wrap leading-relaxed">
+            <div className="rounded-xl bg-[#f2f3ff] p-3 text-xs text-[#434655] max-h-40 overflow-y-auto whitespace-pre-wrap leading-relaxed">
               {updateInfo.releaseNotes ||
                 'Nova versão publicada no GitHub com melhorias de leitura e desempenho.'}
             </div>
 
+            <InAppUpdateProgress
+              updateInfo={updateInfo}
+              state={inAppUpdateState}
+              onStartUpdate={onStartInAppUpdate}
+              onOpenAndroidSettings={onOpenAndroidInstallSettings}
+              onInstallCachedAndroidApk={onInstallCachedAndroidApk}
+            />
+
             {updateInfo.assets && updateInfo.assets.length > 0 && (
               <div className="flex flex-col gap-1.5">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-[#434655]">
-                  Arquivos da Release
+                  Pacotes desta Release
                 </span>
-                {updateInfo.assets.map((asset) => (
-                  <a
-                    key={asset.name}
-                    href={asset.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-[#eaedff] hover:bg-[#dae2fd] text-xs font-bold text-[#004ac6]"
-                  >
-                    <span className="truncate">{asset.name}</span>
-                    <Download className="w-4 h-4 shrink-0" />
-                  </a>
-                ))}
+                {updateInfo.assets.map((asset) => {
+                  const isExe = asset.name.toLowerCase().endsWith('.exe');
+                  const isApk = asset.name.toLowerCase().endsWith('.apk');
+                  const supportsDirectInApp =
+                    (inAppUpdateState.platform === 'desktop' && isExe) ||
+                    (inAppUpdateState.platform === 'android' && isApk);
+
+                  return supportsDirectInApp ? (
+                    <button
+                      key={asset.name}
+                      type="button"
+                      disabled={isUpdatingNow}
+                      onClick={() => onStartInAppUpdate(asset)}
+                      className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-[#eaedff] hover:bg-[#dae2fd] disabled:opacity-60 text-xs font-bold text-[#004ac6] cursor-pointer text-left"
+                    >
+                      <span className="truncate">{asset.name}</span>
+                      <Download className="w-4 h-4 shrink-0" />
+                    </button>
+                  ) : (
+                    <a
+                      key={asset.name}
+                      href={asset.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-[#f2f3ff] hover:bg-[#eaedff] text-xs font-bold text-[#131b2e]"
+                    >
+                      <span className="truncate">{asset.name}</span>
+                      <Download className="w-4 h-4 shrink-0 text-[#004ac6]" />
+                    </a>
+                  );
+                })}
               </div>
             )}
 
@@ -155,9 +233,9 @@ export function UpdateBannerModal({
                   href={updateInfo.releaseUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex-1 h-10 rounded-xl bg-[#2563eb] hover:bg-[#004ac6] text-white text-xs font-bold flex items-center justify-center gap-1.5"
+                  className="flex-1 h-10 rounded-xl border border-[#cbd5e1] bg-white hover:bg-[#f2f3ff] text-[#004ac6] text-xs font-bold flex items-center justify-center gap-1.5"
                 >
-                  <span>Abrir no GitHub</span>
+                  <span>Ver no GitHub</span>
                   <ExternalLink className="w-3.5 h-3.5" />
                 </a>
               )}

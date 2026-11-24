@@ -3,6 +3,7 @@ import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import { Unsubscribe } from 'firebase/firestore';
 import {
   AppView,
+  InAppUpdateState,
   LocalAccount,
   Product,
   SaveOperatorInput,
@@ -11,6 +12,7 @@ import {
   StoreInfo,
   StoreOperator,
   UpdateCheckResult,
+  UpdateDownloadAsset,
 } from './types/product';
 import {
   addScanLog,
@@ -50,6 +52,13 @@ import {
   updateStoreNameInFirestore,
 } from './database/firestoreRepository';
 import { checkForGitHubUpdate } from './services/githubUpdateService';
+import {
+  createIdleInAppUpdateState,
+  openAndroidInstallSettings,
+  retryAndroidInstallDownloadedApk,
+  startInAppUpdate,
+  subscribeNativeUpdateEvents,
+} from './services/inAppUpdateService';
 import { useBarcodeKeyboardScanner } from './hooks/useBarcodeKeyboardScanner';
 import { playBeep, triggerHaptic } from './utils/feedback';
 import {
@@ -101,6 +110,9 @@ export default function App() {
   const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null);
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [dismissedUpdateVersion, setDismissedUpdateVersion] = useState<string | null>(null);
+  const [inAppUpdateState, setInAppUpdateState] = useState<InAppUpdateState>(() =>
+    createIdleInAppUpdateState(),
+  );
 
   const [view, setView] = useState<AppView>('home');
   const [returnView, setReturnView] = useState<AppView>('home');
@@ -134,6 +146,19 @@ export default function App() {
     }, 900);
     return () => clearTimeout(timer);
   }, [runUpdateCheck]);
+
+  // Listen to native Android / Electron desktop in-app update download progress
+  useEffect(() => {
+    return subscribeNativeUpdateEvents(setInAppUpdateState);
+  }, []);
+
+  const handleStartInAppUpdate = useCallback(
+    (preferredAsset?: UpdateDownloadAsset) => {
+      if (!updateInfo) return;
+      void startInAppUpdate(updateInfo, setInAppUpdateState, preferredAsset);
+    },
+    [updateInfo],
+  );
 
   const refreshLocalAccountsAndCounts = useCallback(async () => {
     const accounts = getLocalAccounts();
@@ -873,6 +898,10 @@ export default function App() {
         updateInfo={updateInfo}
         dismissedVersion={dismissedUpdateVersion}
         onDismiss={setDismissedUpdateVersion}
+        inAppUpdateState={inAppUpdateState}
+        onStartInAppUpdate={handleStartInAppUpdate}
+        onOpenAndroidInstallSettings={openAndroidInstallSettings}
+        onInstallCachedAndroidApk={retryAndroidInstallDownloadedApk}
       />
 
       <main className="flex-1 w-full">
@@ -914,6 +943,10 @@ export default function App() {
             updateInfo={updateInfo}
             checkingUpdates={checkingUpdates}
             onCheckUpdates={runUpdateCheck}
+            inAppUpdateState={inAppUpdateState}
+            onStartInAppUpdate={handleStartInAppUpdate}
+            onOpenAndroidInstallSettings={openAndroidInstallSettings}
+            onInstallCachedAndroidApk={retryAndroidInstallDownloadedApk}
           />
         ) : !activeOperator ? (
           <ProfileLockScreen
@@ -1046,6 +1079,10 @@ export default function App() {
           updateInfo={updateInfo}
           checkingUpdates={checkingUpdates}
           onCheckUpdates={runUpdateCheck}
+          inAppUpdateState={inAppUpdateState}
+          onStartInAppUpdate={handleStartInAppUpdate}
+          onOpenAndroidInstallSettings={openAndroidInstallSettings}
+          onInstallCachedAndroidApk={retryAndroidInstallDownloadedApk}
         />
       )}
     </div>

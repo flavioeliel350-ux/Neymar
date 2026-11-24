@@ -289,7 +289,7 @@ export async function checkForGitHubUpdate(force = false): Promise<UpdateCheckRe
           assets = prioritizePlatformAssets(
             json.assets
               .filter((a) => a.name && a.browser_download_url)
-              .slice(0, 6)
+              .slice(0, 8)
               .map((a) => ({
                 name: String(a.name),
                 url: String(a.browser_download_url),

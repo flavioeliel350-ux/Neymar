@@ -9,7 +9,6 @@ import {
   Check,
   Cloud,
   CloudUpload,
-  Download,
   Edit3,
   ExternalLink,
   GitBranch,
@@ -47,13 +46,16 @@ import {
   saveGitHubRepoOverride,
 } from '../services/githubUpdateService';
 import {
+  InAppUpdateState,
   LocalAccount,
   SaveOperatorInput,
   StoreInfo,
   StoreOperator,
   UpdateCheckResult,
+  UpdateDownloadAsset,
   UserRole,
 } from '../types/product';
+import { InAppUpdateProgress } from './InAppUpdateProgress';
 import { playBeep, triggerHaptic } from '../utils/feedback';
 import {
   clearPinAttempts,
@@ -100,6 +102,10 @@ interface AccountModalProps {
   updateInfo: UpdateCheckResult | null;
   checkingUpdates: boolean;
   onCheckUpdates: (force?: boolean) => Promise<UpdateCheckResult | void>;
+  inAppUpdateState: InAppUpdateState;
+  onStartInAppUpdate: (preferredAsset?: UpdateDownloadAsset) => void;
+  onOpenAndroidInstallSettings: () => void;
+  onInstallCachedAndroidApk: () => void;
 }
 
 export function AccountModal({
@@ -128,6 +134,10 @@ export function AccountModal({
   updateInfo,
   checkingUpdates,
   onCheckUpdates,
+  inAppUpdateState,
+  onStartInAppUpdate,
+  onOpenAndroidInstallSettings,
+  onInstallCachedAndroidApk,
 }: AccountModalProps) {
   const [authTab, setAuthTab] = useState<AuthTab>('local');
   const [emailMode, setEmailMode] = useState<EmailSubMode>('login');
@@ -1662,28 +1672,26 @@ export function AccountModal({
               </p>
             )}
 
-            {updateInfo.status === 'update_available' && updateInfo.releaseUrl && (
-              <div className="flex flex-wrap gap-2 pt-0.5">
-                {updateInfo.assets?.[0] && (
+            {updateInfo.status === 'update_available' && (
+              <div className="flex flex-col gap-2 pt-0.5">
+                <InAppUpdateProgress
+                  updateInfo={updateInfo}
+                  state={inAppUpdateState}
+                  onStartUpdate={onStartInAppUpdate}
+                  onOpenAndroidSettings={onOpenAndroidInstallSettings}
+                  onInstallCachedAndroidApk={onInstallCachedAndroidApk}
+                />
+                {updateInfo.releaseUrl && (
                   <a
-                    href={updateInfo.assets[0].url}
+                    href={updateInfo.releaseUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="px-3 py-1.5 rounded-lg bg-[#2563eb] hover:bg-[#004ac6] text-white text-xs font-bold inline-flex items-center gap-1.5"
+                    className="self-start px-3 py-1.5 rounded-lg bg-white hover:bg-[#f2f3ff] text-[#004ac6] border border-[#cbd5e1] text-xs font-bold inline-flex items-center gap-1.5"
                   >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>Baixar {updateInfo.assets[0].name}</span>
+                    <span>Abrir Releases no GitHub</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
                   </a>
                 )}
-                <a
-                  href={updateInfo.releaseUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-3 py-1.5 rounded-lg bg-white hover:bg-[#f2f3ff] text-[#004ac6] border border-[#cbd5e1] text-xs font-bold inline-flex items-center gap-1.5"
-                >
-                  <span>Abrir Releases no GitHub</span>
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </a>
               </div>
             )}
 

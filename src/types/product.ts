@@ -132,6 +132,27 @@ export interface UpdateCheckResult {
   fromCache?: boolean;
 }
 
+export type UpdatePlatform = 'android' | 'desktop' | 'web';
+
+export type InAppUpdateStage =
+  | 'idle'
+  | 'downloading'
+  | 'needs_permission'
+  | 'installing'
+  | 'installer_launched'
+  | 'reloading_web'
+  | 'error';
+
+export interface InAppUpdateState {
+  stage: InAppUpdateStage;
+  platform: UpdatePlatform;
+  percent: number;
+  receivedBytes?: number;
+  totalBytes?: number;
+  assetName?: string;
+  message?: string;
+}
+
 export type ScannerMode = 'query' | 'register';
 
 export type AppView = 'home' | 'scanner' | 'details' | 'form' | 'history';
