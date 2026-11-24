@@ -173,6 +173,7 @@ export async function ensureUserAndStore(user: User): Promise<{
         pinHash: defaultPinHash,
         canConsultPrices: true,
         canAdjustStock: true,
+        canManageProducts: true,
         active: true,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -286,6 +287,7 @@ export function subscribeStoreOperators(
           pin: typeof data.pin === 'string' ? data.pin : undefined,
           canConsultPrices: role === 'manager' ? true : data.canConsultPrices !== false,
           canAdjustStock: role === 'manager' ? true : data.canAdjustStock !== false,
+          canManageProducts: role === 'manager' ? true : Boolean(data.canManageProducts),
           active: Boolean(data.active),
         };
       });
@@ -449,6 +451,7 @@ export async function saveOperatorToFirestore(
     role,
     canConsultPrices: role === 'manager' ? true : Boolean(op.canConsultPrices),
     canAdjustStock: role === 'manager' ? true : Boolean(op.canAdjustStock),
+    canManageProducts: role === 'manager' ? true : Boolean(op.canManageProducts),
     active: Boolean(op.active),
     updatedAt: serverTimestamp(),
   };

@@ -66,7 +66,7 @@ service cloud.firestore {
       return data.keys().hasAll(['id', 'storeId', 'ownerId', 'name', 'code', 'role', 'active', 'createdAt', 'updatedAt'])
         && data.keys().hasOnly([
           'id', 'storeId', 'ownerId', 'name', 'code', 'role',
-          'pin', 'pinHash', 'canConsultPrices', 'canAdjustStock',
+          'pin', 'pinHash', 'canConsultPrices', 'canAdjustStock', 'canManageProducts',
           'active', 'createdAt', 'updatedAt'
         ])
         && data.id is string && isValidId(data.id)
@@ -82,6 +82,7 @@ service cloud.firestore {
         && (!('pin' in data) || (data.pin is string && data.pin.size() >= 4 && data.pin.size() <= 6 && data.pin.matches('^[0-9]{4,6}$')))
         && (!('canConsultPrices' in data) || data.canConsultPrices is bool)
         && (!('canAdjustStock' in data) || data.canAdjustStock is bool)
+        && (!('canManageProducts' in data) || data.canManageProducts is bool)
         && data.active is bool
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
@@ -223,7 +224,7 @@ service cloud.firestore {
           && isStoreOwner(storeId)
           && incoming().diff(existing()).affectedKeys().hasOnly([
             'name', 'code', 'role', 'pin', 'pinHash',
-            'canConsultPrices', 'canAdjustStock', 'active', 'updatedAt'
+            'canConsultPrices', 'canAdjustStock', 'canManageProducts', 'active', 'updatedAt'
           ]);
         allow delete: if isValidId(storeId) && isValidId(operatorId) && isStoreOwner(storeId);
       }

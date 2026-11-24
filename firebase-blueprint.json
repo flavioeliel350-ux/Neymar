@@ -42,6 +42,7 @@
         "pinHash": { "type": "string", "minLength": 10, "maxLength": 128 },
         "canConsultPrices": { "type": "boolean" },
         "canAdjustStock": { "type": "boolean" },
+        "canManageProducts": { "type": "boolean" },
         "active": { "type": "boolean" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }

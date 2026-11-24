@@ -154,6 +154,7 @@ export function ProfileLockScreen({
     const caps: string[] = [];
     if (op.canConsultPrices) caps.push('Consulta preços');
     if (op.canAdjustStock) caps.push('Ajusta estoque');
+    if (op.canManageProducts) caps.push('Cadastra/edita produtos');
     return caps.length > 0 ? `Operador · ${caps.join(' + ')}` : 'Operador · Somente leitura';
   };
 

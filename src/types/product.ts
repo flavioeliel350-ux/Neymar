@@ -64,6 +64,7 @@ export interface StoreOperator {
   pin?: string;
   canConsultPrices: boolean;
   canAdjustStock: boolean;
+  canManageProducts: boolean;
   active: boolean;
 }
 
@@ -77,6 +78,7 @@ export interface SaveOperatorInput {
   existingLegacyPin?: string;
   canConsultPrices: boolean;
   canAdjustStock: boolean;
+  canManageProducts: boolean;
   active: boolean;
 }
 

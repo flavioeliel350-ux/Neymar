@@ -211,10 +211,10 @@ export function ProductFormScreen({
           </div>
           <div>
             <h2 className="text-lg font-extrabold text-[#131b2e]">
-              Acesso Restrito ao Perfil Gerente
+              Permissão Necessária para Cadastrar/Editar
             </h2>
             <p className="text-sm text-[#434655] mt-1">
-              O operador atual ({operatorCode}) tem permissão para consultar preços e ajustar estoque no balcão. Para alterar preços ou cadastrar produtos, troque para um Gerente com PIN.
+              O operador atual ({operatorCode}) não está autorizado a cadastrar ou atualizar produtos. Peça ao Gerente para liberar essa permissão ou troque para um Gerente com PIN.
             </p>
           </div>
           <div className="w-full flex flex-col sm:flex-row gap-2.5 pt-2">

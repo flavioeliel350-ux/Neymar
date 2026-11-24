@@ -179,6 +179,7 @@ export function AccountModal({
   const [opPin, setOpPin] = useState('');
   const [opCanConsult, setOpCanConsult] = useState(true);
   const [opCanAdjustStock, setOpCanAdjustStock] = useState(true);
+  const [opCanManageProducts, setOpCanManageProducts] = useState(false);
   const [opActive, setOpActive] = useState(true);
   const [opError, setOpError] = useState<string | null>(null);
   const [opFeedback, setOpFeedback] = useState<string | null>(null);
@@ -472,6 +473,7 @@ export function AccountModal({
     setOpPin('');
     setOpCanConsult(true);
     setOpCanAdjustStock(true);
+    setOpCanManageProducts(false);
     setOpActive(true);
     setOpError(null);
     setOpFeedback(null);
@@ -487,6 +489,7 @@ export function AccountModal({
     setOpPin('');
     setOpCanConsult(op.canConsultPrices);
     setOpCanAdjustStock(op.canAdjustStock);
+    setOpCanManageProducts(op.canManageProducts);
     setOpActive(op.active);
     setOpError(null);
     setOpFeedback(null);
@@ -540,6 +543,7 @@ export function AccountModal({
         existingLegacyPin: editingOperator?.pin,
         canConsultPrices: finalRole === 'manager' ? true : opCanConsult,
         canAdjustStock: finalRole === 'manager' ? true : opCanAdjustStock,
+        canManageProducts: finalRole === 'manager' ? true : opCanManageProducts,
         active: finalActive,
       });
 
@@ -572,6 +576,7 @@ export function AccountModal({
       existingLegacyPin: op.pin,
       canConsultPrices: op.canConsultPrices,
       canAdjustStock: op.canAdjustStock,
+      canManageProducts: op.canManageProducts,
       active: !op.active,
     });
     triggerHaptic(20);
@@ -1182,6 +1187,7 @@ export function AccountModal({
                       : `Operador · ${[
                           op.canConsultPrices ? 'Consulta' : '',
                           op.canAdjustStock ? 'Estoque' : '',
+                          op.canManageProducts ? 'Cadastro/Edição' : '',
                         ]
                           .filter(Boolean)
                           .join(' + ') || 'Restrito'}`}
@@ -1402,6 +1408,15 @@ export function AccountModal({
                     />
                     <span>Ajustar quantidade em estoque</span>
                   </label>
+                  <label className="flex items-center gap-2 text-xs font-semibold text-[#131b2e] cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={opCanManageProducts}
+                      onChange={(e) => setOpCanManageProducts(e.target.checked)}
+                      className="w-4 h-4 accent-[#007b71]"
+                    />
+                    <span>Cadastrar e atualizar produtos (preços, foto e dados)</span>
+                  </label>
                 </div>
               )}
 
@@ -1488,6 +1503,7 @@ export function AccountModal({
                         : `Permissões: ${[
                             op.canConsultPrices ? 'Consulta' : '',
                             op.canAdjustStock ? 'Estoque' : '',
+                            op.canManageProducts ? 'Cadastro/Edição' : '',
                           ]
                             .filter(Boolean)
                             .join(', ') || 'Nenhuma'}`}
@@ -1547,7 +1563,7 @@ export function AccountModal({
         <div className="bg-[#f2f3ff] rounded-2xl border border-[#e2e7ff] p-3.5 flex items-start gap-2.5">
           <Lock className="w-4 h-4 text-[#434655] shrink-0 mt-0.5" />
           <p className="text-xs text-[#434655] leading-relaxed">
-            <strong>Modo Operador:</strong> A gestão de equipe, edição de PINs e alteração de preços é exclusiva do perfil <strong>Gerente</strong>. Para acessar, entre com o PIN do Gerente acima.
+            <strong>Modo Operador:</strong> A gestão de equipe, exclusão de itens e edição de PINs é exclusiva do perfil <strong>Gerente</strong>. Caso precise liberar o cadastro ou edição de produtos para este operador, peça ao Gerente.
           </p>
         </div>
       )}

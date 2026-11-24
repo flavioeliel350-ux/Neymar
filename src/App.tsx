@@ -399,7 +399,9 @@ export default function App() {
   }, [activeOperator, accountModalOpen, syncMode]);
 
   const isManager = activeOperator?.role === 'manager';
-  const canEditPrices = Boolean(activeOperator && isManager);
+  const canEditPrices = Boolean(
+    activeOperator && (isManager || activeOperator.canManageProducts),
+  );
   const canConsultPrices = Boolean(
     activeOperator && (isManager || activeOperator.canConsultPrices),
   );
@@ -694,7 +696,7 @@ export default function App() {
     payload: Omit<Product, 'updatedAt'>,
   ): Promise<Product> => {
     if (!activeOperator || !canEditPrices) {
-      throw new Error('Operação restrita ao perfil Gerente.');
+      throw new Error('Perfil atual sem permissão para cadastrar ou atualizar produtos.');
     }
 
     const existedBefore = Boolean(findProductInstant(payload.barcode));
@@ -738,7 +740,7 @@ export default function App() {
   };
 
   const handleDeleteProduct = async (barcode: string) => {
-    if (!activeOperator || !canEditPrices) {
+    if (!activeOperator || !isManager) {
       setAccountModalOpen(true);
       return;
     }
@@ -1020,7 +1022,7 @@ export default function App() {
                 canEditPrices={canEditPrices}
                 operatorCode={operatorCode}
                 onSave={handleSaveProduct}
-                onDelete={handleDeleteProduct}
+                onDelete={isManager ? handleDeleteProduct : undefined}
                 onContinueScanning={() => handleStartScan('register')}
                 onViewProduct={(saved) => {
                   setActiveProduct(saved);

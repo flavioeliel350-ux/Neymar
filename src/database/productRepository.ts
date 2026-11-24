@@ -109,6 +109,7 @@ function normalizeOperator(
     pin: op.pinHash ? undefined : op.pin,
     canConsultPrices: role === 'manager' ? true : op.canConsultPrices !== false,
     canAdjustStock: role === 'manager' ? true : op.canAdjustStock !== false,
+    canManageProducts: role === 'manager' ? true : Boolean(op.canManageProducts),
     active: op.active !== false,
   };
 }
@@ -181,6 +182,7 @@ export async function createLocalAccount(
         pinHash,
         canConsultPrices: true,
         canAdjustStock: true,
+        canManageProducts: true,
         active: true,
       },
     ],
@@ -242,6 +244,7 @@ export async function saveLocalAccountOperator(
     ...(!pinHash && legacyPin ? { pin: legacyPin } : {}),
     canConsultPrices: role === 'manager' ? true : Boolean(op.canConsultPrices),
     canAdjustStock: role === 'manager' ? true : Boolean(op.canAdjustStock),
+    canManageProducts: role === 'manager' ? true : Boolean(op.canManageProducts),
     active: Boolean(op.active),
   };
 
