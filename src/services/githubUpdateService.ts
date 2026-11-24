@@ -1,3 +1,4 @@
+import { Capacitor } from '@capacitor/core';
 import { APP_VERSION, appLogger, GITHUB_CONFIG } from '../config/appConfig';
 import {
   GitHubRepoOverride,
@@ -184,6 +185,7 @@ async function fetchFallbackManifestVersion(
   bypassCache: boolean,
 ): Promise<{ version: string; releaseUrl: string; notes?: string } | null> {
   const candidates = [
+    `https://raw.githubusercontent.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${encodeURIComponent(branch)}/public/version.json`,
     `https://raw.githubusercontent.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${encodeURIComponent(branch)}/version.json`,
     `https://raw.githubusercontent.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${encodeURIComponent(branch)}/package.json`,
   ];
@@ -207,9 +209,79 @@ async function fetchFallbackManifestVersion(
   return null;
 }
 
+function isWebBrowserRuntime(): boolean {
+  if (typeof window === 'undefined') return false;
+  const w = window as unknown as { prontoPrecoDesktop?: { isDesktop?: boolean } };
+  if (w.prontoPrecoDesktop?.isDesktop) return false;
+  if (Capacitor.isNativePlatform()) return false;
+  return true;
+}
+
+async function checkWebOriginVersion(): Promise<{ version: string; builtAt?: string } | null> {
+  if (!isWebBrowserRuntime()) return null;
+  try {
+    const res = await fetchWithTimeout('/version.json', 'application/json', true);
+    if (!res.ok) return null;
+    const data = (await res.json()) as { version?: string; builtAt?: string };
+    if (data?.version && /\d+\.\d+\.\d+/.test(data.version)) {
+      return {
+        version: normalizeSemver(data.version),
+        builtAt: typeof data.builtAt === 'string' ? data.builtAt : undefined,
+      };
+    }
+  } catch {
+    // Ignore same-origin manifest fetch errors
+  }
+  return null;
+}
+
+function extractReleaseAssets(release: GitHubReleaseResponse): UpdateDownloadAsset[] | undefined {
+  if (!Array.isArray(release.assets) || release.assets.length === 0) return undefined;
+  const mapped = release.assets
+    .filter((a) => a.name && a.browser_download_url)
+    .slice(0, 10)
+    .map((a) => ({
+      name: String(a.name),
+      url: String(a.browser_download_url),
+    }));
+  return mapped.length > 0 ? prioritizePlatformAssets(mapped) : undefined;
+}
+
 export async function checkForGitHubUpdate(force = false): Promise<UpdateCheckResult> {
   const nowIso = new Date().toISOString();
   const repoCfg = getEffectiveGitHubRepo();
+  const webRuntime = isWebBrowserRuntime();
+
+  // On Web browsers, always check if the hosted server already has a newer /version.json build
+  if (webRuntime && (typeof navigator === 'undefined' || navigator.onLine !== false)) {
+    const webOrigin = await checkWebOriginVersion();
+    if (webOrigin && compareSemver(webOrigin.version, APP_VERSION) > 0) {
+      return {
+        status: 'update_available',
+        currentVersion: APP_VERSION,
+        latestVersion: webOrigin.version,
+        releaseTitle: `Nova atualização Web v${webOrigin.version}`,
+        releaseNotes:
+          'Uma versão mais recente do ProntoPreço já está disponível neste servidor. Clique em Atualizar para recarregar sem perder seus dados locais.',
+        checkedAt: nowIso,
+        source: 'web_origin',
+        message: `Nova versão v${webOrigin.version} disponível no servidor! (Instalada: v${APP_VERSION})`,
+      };
+    }
+
+    if (!repoCfg.owner || !repoCfg.repo) {
+      if (webOrigin) {
+        return {
+          status: 'up_to_date',
+          currentVersion: APP_VERSION,
+          latestVersion: webOrigin.version,
+          checkedAt: nowIso,
+          source: 'web_origin',
+          message: `Você já está na versão web mais recente (v${APP_VERSION}). Vincule um repositório GitHub abaixo para acompanhar pacotes Android/Windows.`,
+        };
+      }
+    }
+  }
 
   if (!repoCfg.owner || !repoCfg.repo) {
     return {
@@ -217,7 +289,7 @@ export async function checkForGitHubUpdate(force = false): Promise<UpdateCheckRe
       currentVersion: APP_VERSION,
       checkedAt: nowIso,
       message:
-        'Repositório GitHub não vinculado ainda. Informe seu usuário/repositório abaixo para verificar novas versões.',
+        'Repositório GitHub não vinculado ainda. Informe seu usuário/repositório abaixo para verificar e baixar novas versões.',
     };
   }
 
@@ -285,17 +357,33 @@ export async function checkForGitHubUpdate(force = false): Promise<UpdateCheckRe
         releaseNotes = (json.body || '').trim().slice(0, 800) || undefined;
         releaseUrl = json.html_url || releaseUrl;
         publishedAt = json.published_at;
-        if (Array.isArray(json.assets)) {
-          assets = prioritizePlatformAssets(
-            json.assets
-              .filter((a) => a.name && a.browser_download_url)
-              .slice(0, 8)
-              .map((a) => ({
-                name: String(a.name),
-                url: String(a.browser_download_url),
-              })),
-          );
+        assets = extractReleaseAssets(json);
+      }
+    }
+
+    // If /releases/latest didn't return anything (e.g. prerelease or tag-only), inspect recent releases
+    if (!latestVersion) {
+      try {
+        const listUrl = `https://api.github.com/repos/${encodeURIComponent(
+          repoCfg.owner,
+        )}/${encodeURIComponent(repoCfg.repo)}/releases?per_page=3`;
+        const listRes = await fetchWithTimeout(listUrl, 'application/vnd.github+json', force);
+        if (listRes.ok) {
+          const listJson = (await listRes.json()) as GitHubReleaseResponse[];
+          const candidate = Array.isArray(listJson)
+            ? listJson.find((r) => Boolean(r.tag_name))
+            : undefined;
+          if (candidate?.tag_name) {
+            latestVersion = normalizeSemver(candidate.tag_name);
+            releaseTitle = (candidate.name || `Versão ${latestVersion}`).trim();
+            releaseNotes = (candidate.body || '').trim().slice(0, 800) || undefined;
+            releaseUrl = candidate.html_url || releaseUrl;
+            publishedAt = candidate.published_at;
+            assets = extractReleaseAssets(candidate);
+          }
         }
+      } catch {
+        // Ignore list fallback error
       }
     }
 
@@ -321,7 +409,7 @@ export async function checkForGitHubUpdate(force = false): Promise<UpdateCheckRe
         releaseUrl,
         checkedAt: nowIso,
         message:
-          'Não foi possível localizar releases ou package.json público em ' +
+          'Não foi possível localizar releases ou version.json público em ' +
           `${repoCfg.owner}/${repoCfg.repo} (branch ${repoCfg.branch}). Verifique se o repositório é público.`,
       };
     }
@@ -338,6 +426,7 @@ export async function checkForGitHubUpdate(force = false): Promise<UpdateCheckRe
           publishedAt,
           assets,
           checkedAt: nowIso,
+          source: 'github',
           message: `Nova versão v${latestVersion} disponível no GitHub! (Instalada: v${APP_VERSION})`,
         }
       : {
@@ -346,6 +435,7 @@ export async function checkForGitHubUpdate(force = false): Promise<UpdateCheckRe
           latestVersion,
           releaseUrl,
           checkedAt: nowIso,
+          source: 'github',
           message: `Você já está na versão mais recente (v${APP_VERSION}).`,
         };
 

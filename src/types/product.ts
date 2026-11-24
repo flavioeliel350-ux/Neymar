@@ -132,6 +132,7 @@ export interface UpdateCheckResult {
   checkedAt: string;
   message: string;
   fromCache?: boolean;
+  source?: 'github' | 'web_origin';
 }
 
 export type UpdatePlatform = 'android' | 'desktop' | 'web';

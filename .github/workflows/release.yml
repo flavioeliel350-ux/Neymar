@@ -1,0 +1,174 @@
+name: Publicar Release Multiplataforma (ProntoPreço)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag da Release (ex: v1.2.0)'
+        required: true
+        default: 'v1.2.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build-android:
+    name: Compilar Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Configurar Java 21 (JDK)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Instalar Android SDK 36 e aceitar licenças
+        run: |
+          SDK_BIN="${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDK_BIN" ]; then
+            SDK_BIN="$(command -v sdkmanager)"
+          fi
+          yes | "$SDK_BIN" --licenses > /dev/null 2>&1 || true
+          "$SDK_BIN" "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+
+      - name: Preservar assinatura debug consistente para atualizações no app
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: prontopreco-android-debug-keystore-v1
+
+      - name: Garantir keystore persistente para atualização sem conflito de assinatura
+        run: |
+          mkdir -p ~/.android
+          if [ ! -f ~/.android/debug.keystore ]; then
+            keytool -genkeypair -v \
+              -keystore ~/.android/debug.keystore \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=ProntoPreco,O=ProntoPreco,C=BR"
+          fi
+
+      - name: Configurar cache do Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Instalar dependências npm
+        run: npm install --legacy-peer-deps
+
+      - name: Compilar bundle web (Vite) com repositório GitHub vinculado
+        env:
+          VITE_GITHUB_REPOSITORY: ${{ github.repository }}
+          VITE_GITHUB_BRANCH: main
+        run: npm run build
+
+      - name: Sincronizar Capacitor Android
+        run: |
+          if [ ! -d "android" ]; then
+            npx cap add android
+          fi
+          npx cap sync android
+
+      - name: Dar permissão de execução ao Gradle Wrapper
+        run: chmod +x android/gradlew
+
+      - name: Compilar APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Preparar APK para Release
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk ProntoPreco-Android.apk
+
+      - name: Upload do APK para a Release
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-android-apk
+          path: ProntoPreco-Android.apk
+          if-no-files-found: error
+
+  build-windows:
+    name: Compilar Windows .exe
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Instalar dependências do app web
+        run: npm install --legacy-peer-deps
+
+      - name: Compilar bundle web (Vite) com repositório GitHub vinculado
+        env:
+          VITE_GITHUB_REPOSITORY: ${{ github.repository }}
+          VITE_GITHUB_BRANCH: main
+        run: npm run build
+
+      - name: Copiar bundle compilado para desktop/dist
+        run: node -e "const fs = require('fs'); fs.rmSync('desktop/dist', { recursive: true, force: true }); fs.cpSync('dist', 'desktop/dist', { recursive: true });"
+
+      - name: Instalar dependências do Electron
+        working-directory: desktop
+        run: npm install
+
+      - name: Compilar executáveis Windows (.exe)
+        working-directory: desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: npx electron-builder --win --publish never
+
+      - name: Upload dos .exe para a Release
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows-exe
+          path: |
+            desktop/release/ProntoPreco-Instalador-Windows.exe
+            desktop/release/ProntoPreco-Portatil-Windows.exe
+          if-no-files-found: error
+
+  publish-release:
+    name: Publicar Release no GitHub
+    needs: [build-android, build-windows]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Baixar APK compilado
+        uses: actions/download-artifact@v4
+        with:
+          name: release-android-apk
+          path: release-assets
+
+      - name: Baixar executáveis Windows
+        uses: actions/download-artifact@v4
+        with:
+          name: release-windows-exe
+          path: release-assets
+
+      - name: Criar/Atualizar Release no GitHub com todos os instaladores
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          make_latest: true
+          generate_release_notes: true
+          files: |
+            release-assets/ProntoPreco-Android.apk
+            release-assets/ProntoPreco-Instalador-Windows.exe
+            release-assets/ProntoPreco-Portatil-Windows.exe

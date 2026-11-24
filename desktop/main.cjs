@@ -333,19 +333,80 @@ if (!gotSingleInstanceLock) {
           throw new Error('O arquivo baixado parece corrompido ou incompleto.');
         }
 
+        // Verify Windows PE executable signature ("MZ")
+        const headerFd = fs.openSync(destPath, 'r');
+        const magicBuf = Buffer.alloc(2);
+        try {
+          fs.readSync(headerFd, magicBuf, 0, 2, 0);
+        } finally {
+          fs.closeSync(headerFd);
+        }
+        if (magicBuf[0] !== 0x4d || magicBuf[1] !== 0x5a) {
+          throw new Error('O arquivo baixado não é um executável Windows válido (.exe).');
+        }
+
+        const portableTarget = process.env.PORTABLE_EXECUTABLE_FILE;
+        if (portableTarget && safeBaseName.toLowerCase().includes('portatil')) {
+          sendUpdateProgress({
+            stage: 'installing',
+            percent: 100,
+            receivedBytes: stats.size,
+            totalBytes: totalBytes || receivedBytes || stats.size,
+            message: 'Aplicando atualização no executável portátil e reiniciando...',
+          });
+
+          const batPath = path.join(app.getPath('temp'), `prontopreco-update-${Date.now()}.cmd`);
+          const escapedNew = destPath.replace(/"/g, '""');
+          const escapedTarget = portableTarget.replace(/"/g, '""');
+          const scriptLines = [
+            '@echo off',
+            'setlocal',
+            'timeout /t 2 /nobreak >nul',
+            'set RETRIES=0',
+            ':copy_loop',
+            `copy /Y "${escapedNew}" "${escapedTarget}" >nul 2>&1`,
+            'if %errorlevel%==0 goto launch_app',
+            'set /a RETRIES+=1',
+            'if %RETRIES% GEQ 12 goto launch_fallback',
+            'timeout /t 1 /nobreak >nul',
+            'goto copy_loop',
+            ':launch_app',
+            `del /Q "${escapedNew}" >nul 2>&1`,
+            `start "" "${escapedTarget}"`,
+            'goto cleanup',
+            ':launch_fallback',
+            `start "" "${escapedNew}"`,
+            ':cleanup',
+            'del "%~f0" >nul 2>&1',
+          ].join('\r\n');
+          fs.writeFileSync(batPath, scriptLines, 'utf8');
+
+          const updaterProc = spawn('cmd.exe', ['/c', batPath], {
+            detached: true,
+            stdio: 'ignore',
+            windowsHide: true,
+          });
+          updaterProc.unref();
+
+          setTimeout(() => {
+            app.quit();
+          }, 500);
+
+          return { ok: true };
+        }
+
         sendUpdateProgress({
           stage: 'installing',
           percent: 100,
           receivedBytes: stats.size,
           totalBytes: totalBytes || receivedBytes || stats.size,
-          message: 'Download concluído! Executando instalador e reiniciando o ProntoPreço...',
+          message: 'Download concluído! Abrindo instalador e encerrando o ProntoPreço...',
         });
 
-        const child = spawn(destPath, [], {
-          detached: true,
-          stdio: 'ignore',
-        });
-        child.unref();
+        const openErr = await shell.openPath(destPath);
+        if (openErr) {
+          throw new Error(`Não foi possível abrir o instalador: ${openErr}`);
+        }
 
         setTimeout(() => {
           app.quit();

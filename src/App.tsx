@@ -139,12 +139,26 @@ export default function App() {
     }
   }, []);
 
-  // Background non-blocking GitHub update check on startup
+  // Background non-blocking update check on startup, reconnect, and periodic interval
   useEffect(() => {
     const timer = setTimeout(() => {
       void runUpdateCheck(false);
     }, 900);
-    return () => clearTimeout(timer);
+
+    const handleOnline = () => {
+      void runUpdateCheck(false);
+    };
+    window.addEventListener('online', handleOnline);
+
+    const interval = setInterval(() => {
+      void runUpdateCheck(false);
+    }, 6 * 60 * 60 * 1000);
+
+    return () => {
+      clearTimeout(timer);
+      clearInterval(interval);
+      window.removeEventListener('online', handleOnline);
+    };
   }, [runUpdateCheck]);
 
   // Listen to native Android / Electron desktop in-app update download progress

@@ -51,7 +51,16 @@ export function UpdateBannerModal({
 
   const handleBannerPrimaryClick = () => {
     setModalOpen(true);
-    if (inAppUpdateState.stage === 'idle' || inAppUpdateState.stage === 'error') {
+    const hasNative =
+      inAppUpdateState.platform === 'web' ||
+      Boolean(
+        updateInfo.assets?.some((a) =>
+          inAppUpdateState.platform === 'android'
+            ? a.name.toLowerCase().endsWith('.apk')
+            : a.name.toLowerCase().endsWith('.exe'),
+        ),
+      );
+    if (hasNative && (inAppUpdateState.stage === 'idle' || inAppUpdateState.stage === 'error')) {
       onStartInAppUpdate();
     }
   };

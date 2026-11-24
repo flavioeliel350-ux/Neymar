@@ -23,6 +23,39 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class ProntoPrecoUpdaterPlugin extends Plugin {
     private static final String UPDATE_APK_FILENAME = "prontopreco-update.apk";
     private final AtomicBoolean isDownloadingUpdate = new AtomicBoolean(false);
+    private volatile boolean pendingPermissionInstall = false;
+
+    @Override
+    protected void handleOnResume() {
+        super.handleOnResume();
+        if (!pendingPermissionInstall) {
+            return;
+        }
+        Context context = getContext();
+        if (context == null) {
+            return;
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || context.getPackageManager().canRequestPackageInstalls()) {
+            pendingPermissionInstall = false;
+            File apkFile = new File(context.getCacheDir(), UPDATE_APK_FILENAME);
+            if (apkFile.exists() && isValidApkArchive(apkFile)) {
+                launchApkInstaller(apkFile);
+            }
+        }
+    }
+
+    private boolean isValidApkArchive(File file) {
+        if (file == null || !file.exists() || file.length() < 100000L) {
+            return false;
+        }
+        try (java.io.FileInputStream fis = new java.io.FileInputStream(file)) {
+            int b0 = fis.read();
+            int b1 = fis.read();
+            return b0 == 0x50 && b1 == 0x4B; // "PK" ZIP/APK header
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
 
     private boolean isAllowedDownloadUrl(String rawUrl) {
         if (rawUrl == null) return false;
@@ -62,22 +95,25 @@ public class ProntoPrecoUpdaterPlugin extends Plugin {
 
     private void launchApkInstaller(File apkFile) {
         Context context = getContext();
-        if (context == null || apkFile == null || !apkFile.exists() || apkFile.length() < 100000L) {
+        if (context == null || !isValidApkArchive(apkFile)) {
+            pendingPermissionInstall = false;
             emitProgress("error", 0, 0, 0, "Arquivo APK inválido ou incompleto.");
             return;
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !context.getPackageManager().canRequestPackageInstalls()) {
+            pendingPermissionInstall = true;
             emitProgress(
                 "needs_permission",
                 100,
                 apkFile.length(),
                 apkFile.length(),
-                "Autorize o ProntoPreço a instalar atualizações nas configurações do Android e toque em Instalar APK."
+                "Autorize o ProntoPreço a instalar atualizações nas configurações do Android. Ao voltar para o app, a instalação abrirá automaticamente."
             );
             return;
         }
 
+        pendingPermissionInstall = false;
         try {
             Uri apkUri = FileProvider.getUriForFile(
                 context,
@@ -218,7 +254,7 @@ public class ProntoPrecoUpdaterPlugin extends Plugin {
                         if (nextUrl == null || nextUrl.isEmpty()) {
                             throw new IllegalStateException("Invalid redirect location");
                         }
-                        currentUrl = nextUrl;
+                        currentUrl = new URL(url, nextUrl).toString();
                         redirects++;
                         continue;
                     }
@@ -253,7 +289,7 @@ public class ProntoPrecoUpdaterPlugin extends Plugin {
                             lastEmitMs = now;
                             int pct = totalBytes > 0
                                 ? (int) Math.min(99, (receivedBytes * 100L) / totalBytes)
-                                : 0;
+                                : (int) Math.min(90, Math.max(5, receivedBytes / (256L * 1024L)));
                             emitProgress(
                                 "downloading",
                                 pct,
@@ -272,6 +308,11 @@ public class ProntoPrecoUpdaterPlugin extends Plugin {
                 }
                 if (!tempFile.renameTo(finalFile)) {
                     throw new IllegalStateException("Failed to rename APK");
+                }
+                if (!isValidApkArchive(finalFile)) {
+                    //noinspection ResultOfMethodCallIgnored
+                    finalFile.delete();
+                    throw new IllegalStateException("Downloaded file is not a valid APK");
                 }
 
                 final long finalSize = finalFile.length();

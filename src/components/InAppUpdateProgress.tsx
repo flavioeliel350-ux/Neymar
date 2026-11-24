@@ -144,22 +144,41 @@ export function InAppUpdateProgress({
       )}
 
       {!isBusy && state.stage !== 'needs_permission' && state.stage !== 'installer_launched' && (
-        <button
-          type="button"
-          onClick={() => onStartUpdate()}
-          className="w-full h-10 px-4 rounded-xl bg-[#2563eb] hover:bg-[#004ac6] text-white text-xs font-extrabold flex items-center justify-center gap-2 shadow-xs active:scale-[0.99] transition-all cursor-pointer"
-        >
-          {state.platform === 'web' ? (
-            <RefreshCw className="w-4 h-4" />
-          ) : state.stage === 'error' ? (
-            <Sparkles className="w-4 h-4" />
-          ) : (
-            <Download className="w-4 h-4" />
-          )}
-          <span>
-            {state.stage === 'error' ? 'Tentar Atualizar Novamente' : primaryButtonLabel}
-          </span>
-        </button>
+        hasNativeAsset || state.platform === 'web' ? (
+          <button
+            type="button"
+            onClick={() => onStartUpdate()}
+            className="w-full h-10 px-4 rounded-xl bg-[#2563eb] hover:bg-[#004ac6] text-white text-xs font-extrabold flex items-center justify-center gap-2 shadow-xs active:scale-[0.99] transition-all cursor-pointer"
+          >
+            {state.platform === 'web' ? (
+              <RefreshCw className="w-4 h-4" />
+            ) : state.stage === 'error' ? (
+              <Sparkles className="w-4 h-4" />
+            ) : (
+              <Download className="w-4 h-4" />
+            )}
+            <span>
+              {state.stage === 'error' ? 'Tentar Atualizar Novamente' : primaryButtonLabel}
+            </span>
+          </button>
+        ) : (
+          <div className="p-3 rounded-xl bg-[#f2f3ff] border border-[#cbd5e1] flex flex-col gap-2">
+            <p className="text-[11px] font-semibold text-[#434655] leading-relaxed">
+              O pacote instalável ({state.platform === 'android' ? '.apk' : '.exe'}) ainda não foi anexado a esta release do GitHub. Assim que o workflow concluir ou você publicar a tag <code className="font-mono">v*</code>, a instalação automática ficará disponível aqui.
+            </p>
+            {updateInfo.releaseUrl && (
+              <a
+                href={updateInfo.releaseUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full h-10 px-4 rounded-xl bg-[#2563eb] hover:bg-[#004ac6] text-white text-xs font-extrabold flex items-center justify-center gap-2 shadow-xs transition-all"
+              >
+                <Download className="w-4 h-4" />
+                <span>Abrir Release no GitHub</span>
+              </a>
+            )}
+          </div>
+        )
       )}
     </div>
   );
