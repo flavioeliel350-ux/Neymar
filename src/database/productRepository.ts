@@ -1,4 +1,5 @@
 import {
+  BarcodeLookupResult,
   LocalAccount,
   Product,
   SaveOperatorInput,
@@ -11,16 +12,19 @@ import {
   hashPin,
   isValidPinFormat,
 } from '../utils/pinSecurity';
+import { clampStockByUnit, normalizeStockUnit } from '../utils/stockUnit';
 
 const DB_NAME = 'prontopreco_offline_db';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE_PRODUCTS = 'products_v2';
 const STORE_LOGS = 'scan_logs_v2';
+const STORE_BARCODE_CACHE = 'barcode_cache_v1';
 
 const LS_ACCOUNTS_KEY = 'prontopreco_local_accounts_v1';
 const LS_ACTIVE_ACCOUNT_KEY = 'prontopreco_active_local_account_v1';
 const LS_PRODUCTS_PREFIX = 'prontopreco_local_products_v2_';
 const LS_LOGS_PREFIX = 'prontopreco_local_logs_v2_';
+const LS_BARCODE_CACHE_KEY = 'prontopreco_barcode_lookup_cache_v1';
 
 // Legacy v1 keys cleaned up on upgrade so no demo/seed items leak into new accounts
 const LEGACY_LS_KEYS = ['prontopreco_products_v1', 'prontopreco_logs_v1'];
@@ -32,6 +36,12 @@ interface StoredProductRecord extends Product {
 
 interface StoredScanLogRecord extends ScanLog {
   accountId: string;
+}
+
+interface StoredBarcodeCacheEntry {
+  barcode: string;
+  result: BarcodeLookupResult;
+  cachedAt: number;
 }
 
 let dbPromise: Promise<IDBDatabase | null> | null = null;
@@ -59,6 +69,9 @@ function openIDB(): Promise<IDBDatabase | null> {
           if (!db.objectStoreNames.contains(STORE_LOGS)) {
             const lStore = db.createObjectStore(STORE_LOGS, { keyPath: 'id' });
             lStore.createIndex('by_account', 'accountId', { unique: false });
+          }
+          if (!db.objectStoreNames.contains(STORE_BARCODE_CACHE)) {
+            db.createObjectStore(STORE_BARCODE_CACHE, { keyPath: 'barcode' });
           }
         };
         request.onsuccess = () => resolve(request.result);
@@ -284,14 +297,23 @@ function productRecordId(accountId: string, barcode: string): string {
   return `${accountId}::${barcode.trim()}`;
 }
 
+function normalizeLocalProduct(product: Product): Product {
+  const unit = normalizeStockUnit(product.unit);
+  return {
+    ...product,
+    unit,
+    stock: clampStockByUnit(Number(product.stock) || 0, unit),
+  };
+}
+
 export async function getAllProducts(accountId: string): Promise<Product[]> {
   if (!accountId) return [];
   await initDatabase();
   const db = await openIDB();
   if (!db) {
-    return readLocalStorage<Product[]>(`${LS_PRODUCTS_PREFIX}${accountId}`, []).sort(
-      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
-    );
+    return readLocalStorage<Product[]>(`${LS_PRODUCTS_PREFIX}${accountId}`, [])
+      .map(normalizeLocalProduct)
+      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
   }
 
   return new Promise((resolve) => {
@@ -300,7 +322,7 @@ export async function getAllProducts(accountId: string): Promise<Product[]> {
     const req = idx.getAll(IDBKeyRange.only(accountId));
     req.onsuccess = () => {
       const items = ((req.result as StoredProductRecord[]) || []).map(
-        ({ id: _id, accountId: _acc, ...product }) => product,
+        ({ id: _id, accountId: _acc, ...product }) => normalizeLocalProduct(product),
       );
       items.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
       resolve(items);
@@ -319,7 +341,8 @@ export async function findProductByBarcode(
   const db = await openIDB();
   if (!db) {
     const items = readLocalStorage<Product[]>(`${LS_PRODUCTS_PREFIX}${accountId}`, []);
-    return items.find((p) => p.barcode === normalized) || null;
+    const found = items.find((p) => p.barcode === normalized);
+    return found ? normalizeLocalProduct(found) : null;
   }
 
   return new Promise((resolve) => {
@@ -332,7 +355,7 @@ export async function findProductByBarcode(
         return;
       }
       const { id: _id, accountId: _acc, ...product } = res;
-      resolve(product);
+      resolve(normalizeLocalProduct(product));
     };
     req.onerror = () => resolve(null);
   });
@@ -343,9 +366,12 @@ export async function upsertProduct(
   product: Omit<Product, 'updatedAt'>,
 ): Promise<Product> {
   await initDatabase();
+  const unit = normalizeStockUnit(product.unit);
   const fullProduct: Product = {
     ...product,
     barcode: product.barcode.trim(),
+    unit,
+    stock: clampStockByUnit(Number(product.stock) || 0, unit),
     updatedAt: new Date().toISOString(),
   };
 
@@ -409,12 +435,106 @@ export async function adjustProductStock(
 ): Promise<Product | null> {
   const existing = await findProductByBarcode(accountId, barcode);
   if (!existing) return null;
-  const nextStock = Math.max(0, existing.stock + delta);
+  const unit = normalizeStockUnit(existing.unit);
+  const nextStock = clampStockByUnit(existing.stock + delta, unit);
   return upsertProduct(accountId, {
     ...existing,
+    unit,
     stock: nextStock,
     operator: operatorCode || existing.operator,
   });
+}
+
+export async function setProductStock(
+  accountId: string,
+  barcode: string,
+  exactStock: number,
+  operatorCode?: string,
+): Promise<Product | null> {
+  const existing = await findProductByBarcode(accountId, barcode);
+  if (!existing) return null;
+  const unit = normalizeStockUnit(existing.unit);
+  const nextStock = clampStockByUnit(exactStock, unit);
+  return upsertProduct(accountId, {
+    ...existing,
+    unit,
+    stock: nextStock,
+    operator: operatorCode || existing.operator,
+  });
+}
+
+export async function getCachedBarcodeLookup(
+  barcode: string,
+): Promise<BarcodeLookupResult | null> {
+  const clean = barcode.trim();
+  if (!clean) return null;
+  const maxAgeMs = 1000 * 60 * 60 * 24 * 30; // 30 dias
+
+  const db = await openIDB();
+  if (db && db.objectStoreNames.contains(STORE_BARCODE_CACHE)) {
+    const entry = await new Promise<StoredBarcodeCacheEntry | null>((resolve) => {
+      try {
+        const tx = db.transaction(STORE_BARCODE_CACHE, 'readonly');
+        const req = tx.objectStore(STORE_BARCODE_CACHE).get(clean);
+        req.onsuccess = () => resolve((req.result as StoredBarcodeCacheEntry) || null);
+        req.onerror = () => resolve(null);
+      } catch {
+        resolve(null);
+      }
+    });
+    if (entry && Date.now() - entry.cachedAt < maxAgeMs && entry.result) {
+      return entry.result;
+    }
+  }
+
+  const map = readLocalStorage<Record<string, StoredBarcodeCacheEntry>>(LS_BARCODE_CACHE_KEY, {});
+  const lsEntry = map[clean];
+  if (lsEntry && Date.now() - lsEntry.cachedAt < maxAgeMs && lsEntry.result) {
+    return lsEntry.result;
+  }
+  return null;
+}
+
+export async function saveCachedBarcodeLookup(
+  barcode: string,
+  result: BarcodeLookupResult,
+): Promise<void> {
+  const clean = barcode.trim();
+  if (!clean) return;
+  const entry: StoredBarcodeCacheEntry = {
+    barcode: clean,
+    result,
+    cachedAt: Date.now(),
+  };
+
+  const db = await openIDB();
+  if (db && db.objectStoreNames.contains(STORE_BARCODE_CACHE)) {
+    await new Promise<void>((resolve) => {
+      try {
+        const tx = db.transaction(STORE_BARCODE_CACHE, 'readwrite');
+        tx.objectStore(STORE_BARCODE_CACHE).put(entry);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => resolve();
+      } catch {
+        resolve();
+      }
+    });
+    return;
+  }
+
+  const map = readLocalStorage<Record<string, StoredBarcodeCacheEntry>>(LS_BARCODE_CACHE_KEY, {});
+  map[clean] = entry;
+  // Limita armazenamento em localStorage caso IndexedDB não esteja disponível
+  const keys = Object.keys(map);
+  if (keys.length > 150) {
+    keys
+      .sort((a, b) => map[a].cachedAt - map[b].cachedAt)
+      .slice(0, keys.length - 150)
+      .forEach((k) => {
+        delete map[k];
+      });
+  }
+  writeLocalStorage(LS_BARCODE_CACHE_KEY, map);
 }
 
 export async function getScanLogs(accountId: string, limit = 50): Promise<ScanLog[]> {

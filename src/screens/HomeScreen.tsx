@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { AppView, Product, ScanLog, ScannerMode, StoreOperator } from '../types/product';
 import { formatBRL, formatRelativeTime, triggerHaptic } from '../utils/feedback';
+import { formatStockWithUnit } from '../utils/stockUnit';
 import { ProductVisual } from '../components/ProductVisual';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 
@@ -281,8 +282,9 @@ export function HomeScreen({
                         <p className="text-sm font-bold text-[#131b2e] truncate">
                           {item.name}
                         </p>
-                        <p className="font-mono text-xs text-[#434655]">
-                          {item.barcode} · {item.location}
+                        <p className="font-mono text-xs text-[#434655] truncate">
+                          {item.barcode} · {formatStockWithUnit(item.stock, item.unit)} ·{' '}
+                          {item.location}
                         </p>
                       </div>
                       <span className="font-bold text-sm text-[#006e2d] tabular-nums whitespace-nowrap shrink-0">

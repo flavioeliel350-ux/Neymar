@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { CATEGORIES, Category, Product, ScanLog } from '../types/product';
 import { formatBRL, formatRelativeTime } from '../utils/feedback';
+import { formatStockWithUnit, normalizeStockUnit } from '../utils/stockUnit';
 import { ProductVisual } from '../components/ProductVisual';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 
@@ -63,11 +64,11 @@ export function HistoryCatalogScreen({
   }, [logs, debouncedQuery]);
 
   const handleExportCsv = () => {
-    const header = 'barcode,name,brand,category,price,stock,location,updatedAt\n';
+    const header = 'barcode,name,brand,category,price,stock,unit,location,updatedAt\n';
     const rows = products
       .map(
         (p) =>
-          `"${p.barcode}","${p.name.replace(/"/g, '""')}","${p.brand}","${p.category}",${p.price.toFixed(2)},${p.stock},"${p.location}","${p.updatedAt}"`,
+          `"${p.barcode}","${p.name.replace(/"/g, '""')}","${p.brand}","${p.category}",${p.price.toFixed(2)},${p.stock},"${normalizeStockUnit(p.unit)}","${p.location}","${p.updatedAt}"`,
       )
       .join('\n');
     const blob = new Blob([header + rows], { type: 'text/csv;charset=utf-8;' });
@@ -221,7 +222,7 @@ export function HistoryCatalogScreen({
                           {' · '}
                           <span>{item.category}</span>
                           {' · '}
-                          <span>{item.stock} un</span>
+                          <span>{formatStockWithUnit(item.stock, item.unit)}</span>
                           {' · '}
                           <span>{item.location}</span>
                         </p>
@@ -249,12 +250,24 @@ export function HistoryCatalogScreen({
               <div className="divide-y divide-[#f2f3ff]">
                 {filteredLogs.map((log) => {
                   const matched = products.find((p) => p.barcode === log.barcode);
+                  const logUnit = normalizeStockUnit(log.unit || matched?.unit);
+                  const hasStockChange =
+                    typeof log.newStock === 'number' &&
+                    Number.isFinite(log.newStock);
                   const actionLabel =
                     log.action === 'cadastro'
                       ? 'Cadastro'
                       : log.action === 'ajuste'
-                        ? 'Ajuste de Preço'
+                        ? hasStockChange
+                          ? 'Ajuste / Estoque'
+                          : 'Ajuste de Preço'
                         : 'Consulta';
+                  const roleLabel =
+                    log.actorRole === 'manager'
+                      ? 'Gerente'
+                      : log.actorRole === 'operator'
+                        ? 'Operador'
+                        : null;
                   return (
                     <button
                       key={log.id}
@@ -269,19 +282,32 @@ export function HistoryCatalogScreen({
                         <p className="text-sm font-bold text-[#131b2e] truncate">
                           {log.productName}
                         </p>
-                        <p className="text-xs text-[#434655] mt-0.5">
+                        <p className="text-xs text-[#434655] mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
                           <span className="font-mono">{log.barcode}</span>
-                          {' · '}
+                          <span>·</span>
                           <span className="font-semibold text-[#004ac6]">
                             {actionLabel}
                           </span>
+                          {hasStockChange && (
+                            <>
+                              <span>·</span>
+                              <span className="font-semibold text-[#131b2e] tabular-nums">
+                                {typeof log.previousStock === 'number'
+                                  ? `${formatStockWithUnit(log.previousStock, logUnit)} → ${formatStockWithUnit(log.newStock!, logUnit)}`
+                                  : `Estoque: ${formatStockWithUnit(log.newStock!, logUnit)}`}
+                              </span>
+                            </>
+                          )}
                           {log.operator ? (
                             <>
-                              {' · '}
-                              <span className="font-mono">{log.operator}</span>
+                              <span>·</span>
+                              <span className="font-mono">
+                                {log.operator}
+                                {roleLabel ? ` (${roleLabel})` : ''}
+                              </span>
                             </>
                           ) : null}
-                          {' · '}
+                          <span>·</span>
                           <span>{formatRelativeTime(log.timestamp)}</span>
                         </p>
                       </div>

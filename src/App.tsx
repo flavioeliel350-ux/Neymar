@@ -16,7 +16,6 @@ import {
 } from './types/product';
 import {
   addScanLog,
-  adjustProductStock,
   createLocalAccount,
   deleteLocalAccountOperator,
   deleteProduct,
@@ -28,9 +27,11 @@ import {
   initDatabase,
   saveLocalAccountOperator,
   setActiveLocalAccountId,
+  setProductStock,
   updateLocalAccountStoreName,
   upsertProduct,
 } from './database/productRepository';
+import { clampStockByUnit, normalizeStockUnit } from './utils/stockUnit';
 import {
   auth,
   handleFirestoreError,
@@ -573,13 +574,15 @@ export default function App() {
   const recordScanLog = useCallback(
     async (entry: Omit<ScanLog, 'id' | 'timestamp'>) => {
       if (!activeOperator) return;
+      const enriched: Omit<ScanLog, 'id' | 'timestamp'> = {
+        ...entry,
+        operator: entry.operator || operatorCode,
+        actorRole: entry.actorRole || activeOperator.role,
+      };
       if (syncMode === 'cloud' && authUser && storeInfo) {
-        await addScanLogToFirestore(storeInfo.storeId, storeInfo.ownerId, authUser.uid, {
-          ...entry,
-          operator: operatorCode,
-        });
+        await addScanLogToFirestore(storeInfo.storeId, storeInfo.ownerId, authUser.uid, enriched);
       } else if (syncMode === 'local' && activeLocalAccount) {
-        await addScanLog(activeLocalAccount.id, { ...entry, operator: operatorCode });
+        await addScanLog(activeLocalAccount.id, enriched);
         await refreshLocalStoreData(activeLocalAccount.id);
       }
     },
@@ -713,14 +716,22 @@ export default function App() {
       throw new Error('Perfil atual sem permissão para cadastrar ou atualizar produtos.');
     }
 
-    const existedBefore = Boolean(findProductInstant(payload.barcode));
+    const existingBefore = findProductInstant(payload.barcode);
+    const existedBefore = Boolean(existingBefore);
+    const safeUnit = normalizeStockUnit(payload.unit);
+    const sanitizedPayload: Omit<Product, 'updatedAt'> = {
+      ...payload,
+      unit: safeUnit,
+      stock: clampStockByUnit(payload.stock, safeUnit),
+      operator: operatorCode,
+    };
 
     if (syncMode === 'cloud' && authUser && storeInfo) {
       const saved = await saveProductToFirestore(
         storeInfo.storeId,
         storeInfo.ownerId,
         authUser.uid,
-        { ...payload, operator: operatorCode },
+        sanitizedPayload,
       );
       await addScanLogToFirestore(storeInfo.storeId, storeInfo.ownerId, authUser.uid, {
         barcode: saved.barcode,
@@ -728,6 +739,10 @@ export default function App() {
         price: saved.price,
         action: existedBefore ? 'ajuste' : 'cadastro',
         operator: operatorCode,
+        actorRole: activeOperator.role,
+        unit: saved.unit,
+        previousStock: existingBefore?.stock,
+        newStock: saved.stock,
       });
       setActiveProduct(saved);
       return saved;
@@ -737,16 +752,17 @@ export default function App() {
       throw new Error('Nenhuma loja local selecionada.');
     }
 
-    const saved = await upsertProduct(activeLocalAccount.id, {
-      ...payload,
-      operator: operatorCode,
-    });
+    const saved = await upsertProduct(activeLocalAccount.id, sanitizedPayload);
     await addScanLog(activeLocalAccount.id, {
       barcode: saved.barcode,
       productName: saved.name,
       price: saved.price,
       action: existedBefore ? 'ajuste' : 'cadastro',
       operator: operatorCode,
+      actorRole: activeOperator.role,
+      unit: saved.unit,
+      previousStock: existingBefore?.stock,
+      newStock: saved.stock,
     });
     await refreshLocalStoreData(activeLocalAccount.id);
     setActiveProduct(saved);
@@ -768,7 +784,11 @@ export default function App() {
     setView('history');
   };
 
-  const handleAdjustStock = async (barcode: string, delta: number) => {
+  const handleAdjustStock = async (
+    barcode: string,
+    value: number,
+    mode: 'delta' | 'set' = 'delta',
+  ) => {
     if (!activeOperator || !canAdjustStock) {
       setAccountModalOpen(true);
       return;
@@ -776,26 +796,55 @@ export default function App() {
     const existing = findProductInstant(barcode);
     if (!existing) return;
 
+    const unit = normalizeStockUnit(existing.unit);
+    const previousStock = clampStockByUnit(existing.stock, unit);
+    const nextStock =
+      mode === 'set'
+        ? clampStockByUnit(value, unit)
+        : clampStockByUnit(previousStock + value, unit);
+
     if (syncMode === 'cloud' && authUser && storeInfo) {
-      const nextStock = Math.max(0, existing.stock + delta);
       await adjustStockInFirestore(
         storeInfo.storeId,
         barcode,
         nextStock,
         operatorCode,
         authUser.uid,
+        unit,
       );
+      await addScanLogToFirestore(storeInfo.storeId, storeInfo.ownerId, authUser.uid, {
+        barcode: existing.barcode,
+        productName: existing.name,
+        price: existing.price,
+        action: 'ajuste',
+        operator: operatorCode,
+        actorRole: activeOperator.role,
+        unit,
+        previousStock,
+        newStock: nextStock,
+      });
       return;
     }
 
     if (syncMode === 'local' && activeLocalAccount) {
-      const updated = await adjustProductStock(
+      const updated = await setProductStock(
         activeLocalAccount.id,
         barcode,
-        delta,
+        nextStock,
         operatorCode,
       );
       if (updated) {
+        await addScanLog(activeLocalAccount.id, {
+          barcode: existing.barcode,
+          productName: existing.name,
+          price: existing.price,
+          action: 'ajuste',
+          operator: operatorCode,
+          actorRole: activeOperator.role,
+          unit,
+          previousStock,
+          newStock: updated.stock,
+        });
         setActiveProduct(updated);
         await refreshLocalStoreData(activeLocalAccount.id);
       }

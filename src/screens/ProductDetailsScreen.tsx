@@ -1,7 +1,10 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
+  ArrowDownCircle,
+  ArrowUpCircle,
   BadgeCheck,
   Barcode,
+  Check,
   CheckCircle2,
   Edit3,
   History,
@@ -20,6 +23,14 @@ import {
   formatPriceParts,
   triggerHaptic,
 } from '../utils/feedback';
+import {
+  formatStockInputText,
+  formatStockWithUnit,
+  isDecimalStockUnit,
+  normalizeStockUnit,
+  parseStockInput,
+  STOCK_UNIT_META,
+} from '../utils/stockUnit';
 import { ProductVisual } from '../components/ProductVisual';
 
 interface ProductDetailsScreenProps {
@@ -29,7 +40,11 @@ interface ProductDetailsScreenProps {
   canAdjustStock: boolean;
   onScanNext: () => void;
   onEdit: (product: Product) => void;
-  onAdjustStock: (barcode: string, delta: number) => void;
+  onAdjustStock: (
+    barcode: string,
+    value: number,
+    mode: 'delta' | 'set',
+  ) => Promise<void> | void;
   onRequireManager: () => void;
 }
 
@@ -43,12 +58,83 @@ export function ProductDetailsScreen({
   onAdjustStock,
   onRequireManager,
 }: ProductDetailsScreenProps) {
+  const unit = normalizeStockUnit(product.unit);
+  const unitMeta = STOCK_UNIT_META[unit];
+  const decimalUnit = isDecimalStockUnit(unit);
+
+  const [adjustMode, setAdjustMode] = useState<'delta' | 'set'>('delta');
+  const [qtyInput, setQtyInput] = useState<string>('');
+  const [qtyError, setQtyError] = useState<string | null>(null);
+  const [adjustBusy, setAdjustBusy] = useState(false);
+  const [adjustFeedback, setAdjustFeedback] = useState<string | null>(null);
+
+  useEffect(() => {
+    setQtyError(null);
+    setAdjustFeedback(null);
+    if (adjustMode === 'set') {
+      setQtyInput(formatStockInputText(product.stock, unit));
+    } else {
+      setQtyInput('');
+    }
+  }, [product.barcode, product.stock, unit, adjustMode]);
+
   const { integer, decimal } = formatPriceParts(product.price);
   const wholesale =
     product.wholesalePrice ?? Number((product.price * 0.94).toFixed(2));
   const club =
     product.clubPrice ?? Number((product.price * 0.9).toFixed(2));
   const margin = product.marginPercent ?? 28.0;
+
+  const runAdjustment = async (
+    value: number,
+    mode: 'delta' | 'set',
+    feedbackLabel: string,
+  ) => {
+    setAdjustBusy(true);
+    setQtyError(null);
+    try {
+      await onAdjustStock(product.barcode, value, mode);
+      triggerHaptic(25);
+      setAdjustFeedback(feedbackLabel);
+      if (mode === 'delta') {
+        setQtyInput('');
+      }
+      window.setTimeout(() => {
+        setAdjustFeedback((prev) => (prev === feedbackLabel ? null : prev));
+      }, 2400);
+    } catch {
+      setQtyError('Não foi possível atualizar o estoque agora.');
+    } finally {
+      setAdjustBusy(false);
+    }
+  };
+
+  const handleApplyTypedAdjustment = async (direction: 'add' | 'sub' | 'set') => {
+    const parsed = parseStockInput(qtyInput, unit);
+    if (!parsed.valid) {
+      setQtyError(parsed.error || 'Quantidade inválida.');
+      return;
+    }
+    if (direction === 'set') {
+      await runAdjustment(
+        parsed.value,
+        'set',
+        `Estoque definido para ${formatStockWithUnit(parsed.value, unit)}`,
+      );
+      return;
+    }
+    if (parsed.value <= 0) {
+      setQtyError('Informe uma quantidade maior que zero para somar ou subtrair.');
+      return;
+    }
+    const delta = direction === 'add' ? parsed.value : -parsed.value;
+    const sign = direction === 'add' ? '+' : '-';
+    await runAdjustment(
+      delta,
+      'delta',
+      `Ajuste ${sign}${formatStockWithUnit(parsed.value, unit)} aplicado`,
+    );
+  };
 
   return (
     <div className="w-full max-w-4xl mx-auto px-3 md:px-6 py-4 md:py-6 pb-10">
@@ -96,17 +182,17 @@ export function ProductDetailsScreen({
               </div>
             </div>
 
-            {/* Quick Location & Interactive Inventory */}
+            {/* Quick Location & Current Stock Summary */}
             <div className="grid grid-cols-2 gap-2.5">
               <div className="flex items-center justify-between gap-2 p-3 rounded-xl bg-[#f2f3ff]">
                 <div className="flex items-center gap-2 min-w-0">
                   <Package className="w-5 h-5 text-[#004ac6] shrink-0" />
                   <div className="min-w-0">
                     <span className="text-[10px] font-bold uppercase text-[#434655] block">
-                      Estoque em Loja
+                      Estoque Atual ({unitMeta.shortLabel})
                     </span>
-                    <span className="text-sm font-extrabold text-[#131b2e] tabular-nums">
-                      {product.stock} un
+                    <span className="text-base font-extrabold text-[#131b2e] tabular-nums">
+                      {formatStockWithUnit(product.stock, unit)}
                     </span>
                   </div>
                 </div>
@@ -114,23 +200,23 @@ export function ProductDetailsScreen({
                   <div className="flex items-center gap-1 shrink-0">
                     <button
                       type="button"
-                      aria-label="Diminuir estoque"
-                      onClick={() => {
-                        triggerHaptic(20);
-                        onAdjustStock(product.barcode, -1);
-                      }}
-                      className="w-7 h-7 rounded-lg bg-white border border-[#cbd5e1] flex items-center justify-center text-[#131b2e] hover:bg-[#eaedff] active:scale-95 cursor-pointer"
+                      disabled={adjustBusy}
+                      aria-label="Diminuir 1 unidade"
+                      onClick={() =>
+                        void runAdjustment(-1, 'delta', `-1 ${unit} aplicado`)
+                      }
+                      className="w-8 h-8 rounded-lg bg-white border border-[#cbd5e1] flex items-center justify-center text-[#131b2e] hover:bg-[#eaedff] active:scale-95 disabled:opacity-50 cursor-pointer"
                     >
                       <Minus className="w-3.5 h-3.5" />
                     </button>
                     <button
                       type="button"
-                      aria-label="Aumentar estoque"
-                      onClick={() => {
-                        triggerHaptic(20);
-                        onAdjustStock(product.barcode, 1);
-                      }}
-                      className="w-7 h-7 rounded-lg bg-white border border-[#cbd5e1] flex items-center justify-center text-[#131b2e] hover:bg-[#eaedff] active:scale-95 cursor-pointer"
+                      disabled={adjustBusy}
+                      aria-label="Aumentar 1 unidade"
+                      onClick={() =>
+                        void runAdjustment(1, 'delta', `+1 ${unit} aplicado`)
+                      }
+                      className="w-8 h-8 rounded-lg bg-white border border-[#cbd5e1] flex items-center justify-center text-[#131b2e] hover:bg-[#eaedff] active:scale-95 disabled:opacity-50 cursor-pointer"
                     >
                       <Plus className="w-3.5 h-3.5" />
                     </button>
@@ -157,6 +243,126 @@ export function ProductDetailsScreen({
                 </div>
               </div>
             </div>
+
+            {/* Direct Numeric Stock Adjustment Controls */}
+            {canAdjustStock && (
+              <div className="rounded-xl border border-[#e2e7ff] bg-[#f8f9ff] p-3 flex flex-col gap-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[11px] font-extrabold uppercase tracking-wide text-[#131b2e]">
+                    Movimentar / Definir Estoque ({unit})
+                  </span>
+                  <div className="inline-flex p-0.5 rounded-lg bg-[#e2e7ff]">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAdjustMode('delta');
+                        setQtyError(null);
+                      }}
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-colors ${
+                        adjustMode === 'delta'
+                          ? 'bg-white text-[#004ac6] shadow-xs'
+                          : 'text-[#434655] hover:text-[#131b2e]'
+                      }`}
+                    >
+                      Somar / Tirar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAdjustMode('set');
+                        setQtyError(null);
+                      }}
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-colors ${
+                        adjustMode === 'set'
+                          ? 'bg-white text-[#004ac6] shadow-xs'
+                          : 'text-[#434655] hover:text-[#131b2e]'
+                      }`}
+                    >
+                      Definir Total
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                  <div className="flex-1 flex items-center gap-2 h-11 px-3 rounded-xl bg-white border border-[#cbd5e1] focus-within:border-[#2563eb] focus-within:ring-2 focus-within:ring-[#2563eb]/15">
+                    <input
+                      type="text"
+                      inputMode={decimalUnit ? 'decimal' : 'numeric'}
+                      value={qtyInput}
+                      onChange={(e) => {
+                        setQtyInput(e.target.value);
+                        if (qtyError) setQtyError(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          void handleApplyTypedAdjustment(
+                            adjustMode === 'set' ? 'set' : 'add',
+                          );
+                        }
+                      }}
+                      placeholder={
+                        adjustMode === 'set'
+                          ? decimalUnit
+                            ? 'Total exato (ex: 1,500)'
+                            : 'Total exato (ex: 24)'
+                          : decimalUnit
+                            ? 'Quantidade (ex: 2,500)'
+                            : 'Quantidade (ex: 15)'
+                      }
+                      aria-label="Quantidade de estoque"
+                      className="w-full bg-transparent text-sm font-extrabold text-[#131b2e] tabular-nums focus:outline-none"
+                    />
+                    <span className="text-xs font-extrabold text-[#004ac6] bg-[#eaedff] px-2 py-0.5 rounded shrink-0">
+                      {unit}
+                    </span>
+                  </div>
+
+                  {adjustMode === 'delta' ? (
+                    <div className="grid grid-cols-2 gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        disabled={adjustBusy}
+                        onClick={() => void handleApplyTypedAdjustment('add')}
+                        className="h-11 px-3 rounded-xl bg-[#006e2d] hover:bg-[#005320] text-white text-xs font-extrabold flex items-center justify-center gap-1.5 disabled:opacity-50 active:scale-95 transition-all"
+                      >
+                        <ArrowUpCircle className="w-4 h-4" />
+                        <span>Entrada</span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={adjustBusy}
+                        onClick={() => void handleApplyTypedAdjustment('sub')}
+                        className="h-11 px-3 rounded-xl bg-[#434655] hover:bg-[#313444] text-white text-xs font-extrabold flex items-center justify-center gap-1.5 disabled:opacity-50 active:scale-95 transition-all"
+                      >
+                        <ArrowDownCircle className="w-4 h-4" />
+                        <span>Saída</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={adjustBusy}
+                      onClick={() => void handleApplyTypedAdjustment('set')}
+                      className="h-11 px-4 rounded-xl bg-[#2563eb] hover:bg-[#004ac6] text-white text-xs font-extrabold flex items-center justify-center gap-1.5 disabled:opacity-50 shrink-0 active:scale-95 transition-all"
+                    >
+                      <Check className="w-4 h-4" />
+                      <span>Aplicar Total</span>
+                    </button>
+                  )}
+                </div>
+
+                {qtyError && (
+                  <p className="text-xs font-semibold text-[#ba1a1a]">{qtyError}</p>
+                )}
+                {!qtyError && adjustFeedback && (
+                  <p className="text-xs font-bold text-[#006e2d] flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                    <span>{adjustFeedback}</span>
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Giant Retail Price Card */}
@@ -185,11 +391,13 @@ export function ProductDetailsScreen({
             <div className="bg-white/90 rounded-xl p-2.5 grid grid-cols-2 divide-x divide-[#e2e7ff]">
               <div className="px-2">
                 <span className="text-[10px] font-bold uppercase text-[#434655] block">
-                  Atacado (3+ un)
+                  Atacado (3+ {unit.toLowerCase()})
                 </span>
                 <span className="text-sm font-extrabold text-[#131b2e] tabular-nums">
                   {formatBRL(wholesale)}{' '}
-                  <span className="text-[11px] font-normal text-[#434655]">/un</span>
+                  <span className="text-[11px] font-normal text-[#434655]">
+                    /{unit.toLowerCase()}
+                  </span>
                 </span>
               </div>
               <div className="px-2">
@@ -198,7 +406,9 @@ export function ProductDetailsScreen({
                 </span>
                 <span className="text-sm font-extrabold text-[#004ac6] tabular-nums">
                   {formatBRL(club)}{' '}
-                  <span className="text-[11px] font-normal text-[#434655]">/un</span>
+                  <span className="text-[11px] font-normal text-[#434655]">
+                    /{unit.toLowerCase()}
+                  </span>
                 </span>
               </div>
             </div>

@@ -11,6 +11,10 @@ export const CATEGORIES: Category[] = [
 
 export type UserRole = 'manager' | 'operator';
 
+export type StockUnit = 'UN' | 'CX' | 'PCT' | 'FD' | 'KG' | 'G' | 'L' | 'ML';
+
+export const STOCK_UNITS: StockUnit[] = ['UN', 'CX', 'PCT', 'FD', 'KG', 'G', 'L', 'ML'];
+
 export interface Product {
   barcode: string;
   name: string;
@@ -21,6 +25,7 @@ export interface Product {
   clubPrice?: number;
   marginPercent?: number;
   stock: number;
+  unit?: StockUnit;
   location: string;
   weightLabel: string;
   description?: string;
@@ -36,6 +41,10 @@ export interface ScanLog {
   price: number;
   action: 'consulta' | 'cadastro' | 'ajuste';
   operator?: string;
+  actorRole?: UserRole;
+  unit?: StockUnit;
+  previousStock?: number;
+  newStock?: number;
   timestamp: string;
 }
 
@@ -94,6 +103,7 @@ export interface BarcodeLookupResult {
   name: string;
   brand?: string;
   weightLabel?: string;
+  suggestedUnit?: StockUnit;
   category?: Category;
   imageUrl?: string;
   source: 'Open Food Facts' | 'Open Products Facts' | 'Open Beauty Facts';

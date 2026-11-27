@@ -8,6 +8,8 @@ import {
   Link2,
   Loader2,
   Lock,
+  Minus,
+  Plus,
   ScanBarcode,
   Search,
   Sparkles,
@@ -15,7 +17,13 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { CATEGORIES, Category, Product } from '../types/product';
+import {
+  CATEGORIES,
+  Category,
+  Product,
+  STOCK_UNITS,
+  StockUnit,
+} from '../types/product';
 import { playBeep, triggerHaptic } from '../utils/feedback';
 import { lookupProductByBarcode } from '../services/barcodeLookupService';
 import { ProductVisual } from '../components/ProductVisual';
@@ -24,6 +32,15 @@ import {
   sanitizeProductImageUrl,
   validateHttpsImageUrl,
 } from '../utils/imageHelper';
+import {
+  clampStockByUnit,
+  formatStockInputText,
+  formatStockWithUnit,
+  isDecimalStockUnit,
+  normalizeStockUnit,
+  parseStockInput,
+  STOCK_UNIT_META,
+} from '../utils/stockUnit';
 
 interface ProductFormScreenProps {
   initialBarcode?: string;
@@ -83,12 +100,16 @@ export function ProductFormScreen({
   const [location, setLocation] = useState(
     existingProduct?.location || 'Gôndola 01 - Prateleira A',
   );
+  const initialUnit: StockUnit = normalizeStockUnit(existingProduct?.unit);
+  const [unit, setUnit] = useState<StockUnit>(initialUnit);
   const [weightLabel, setWeightLabel] = useState(
     existingProduct?.weightLabel || 'un',
   );
   const [stockStr, setStockStr] = useState(
-    existingProduct ? String(existingProduct.stock) : '12',
+    existingProduct ? formatStockInputText(existingProduct.stock, initialUnit) : '0',
   );
+  const [stockDeltaStr, setStockDeltaStr] = useState('');
+  const [stockInputError, setStockInputError] = useState<string | null>(null);
   const [marginStr, setMarginStr] = useState(
     existingProduct?.marginPercent ? String(existingProduct.marginPercent) : '30',
   );
@@ -109,6 +130,7 @@ export function ProductFormScreen({
   const nameDirtyRef = useRef(Boolean(existingProduct?.name));
   const brandDirtyRef = useRef(Boolean(existingProduct?.brand));
   const weightDirtyRef = useRef(Boolean(existingProduct?.weightLabel));
+  const unitDirtyRef = useRef(Boolean(existingProduct?.unit));
   const categoryDirtyRef = useRef(Boolean(existingProduct?.category));
   const imageDirtyRef = useRef(Boolean(existingProduct?.imageUrl));
   const lastLookedUpRef = useRef<string>('');
@@ -147,7 +169,7 @@ export function ProductFormScreen({
     setLookupStatus('loading');
     setLookupSource(null);
 
-    const found = await lookupProductByBarcode(clean);
+    const found = await lookupProductByBarcode(clean, force);
     if (lastLookedUpRef.current !== clean) return;
 
     if (!found) {
@@ -168,6 +190,9 @@ export function ProductFormScreen({
     }
     if (!weightDirtyRef.current && found.weightLabel) {
       setWeightLabel(found.weightLabel);
+    }
+    if (!unitDirtyRef.current && found.suggestedUnit) {
+      setUnit(found.suggestedUnit);
     }
     if (!categoryDirtyRef.current && found.category) {
       setCategory(found.category);
@@ -322,7 +347,14 @@ export function ProductFormScreen({
       return;
     }
 
-    const stockNum = Math.max(0, parseInt(stockStr, 10) || 0);
+    const parsedStock = parseStockInput(stockStr, unit);
+    if (!parsedStock.valid) {
+      setStockInputError(parsedStock.error || 'Quantidade de estoque inválida.');
+      setErrorMsg(parsedStock.error || 'Quantidade de estoque inválida.');
+      return;
+    }
+
+    const stockNum = parsedStock.value;
     const marginNum = Math.max(0, parseFloat(marginStr.replace(',', '.')) || 28);
 
     try {
@@ -337,8 +369,9 @@ export function ProductFormScreen({
         clubPrice: Number((numericPrice * 0.9).toFixed(2)),
         marginPercent: Number(marginNum.toFixed(1)),
         stock: stockNum,
+        unit,
         location: location.trim() || 'Balcão',
-        weightLabel: weightLabel.trim() || 'un',
+        weightLabel: weightLabel.trim() || unit.toLowerCase(),
         description: description.trim(),
         imageUrl: sanitizeProductImageUrl(imageUrl) || undefined,
         operator: operatorCode || 'Op. 01',
@@ -355,6 +388,40 @@ export function ProductFormScreen({
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleSelectUnit = (nextUnit: StockUnit) => {
+    unitDirtyRef.current = true;
+    setUnit(nextUnit);
+    setStockInputError(null);
+    const parsed = parseStockInput(stockStr, isDecimalStockUnit(nextUnit) ? nextUnit : 'KG');
+    if (parsed.valid) {
+      setStockStr(formatStockInputText(clampStockByUnit(parsed.value, nextUnit), nextUnit));
+    }
+    triggerHaptic(15);
+  };
+
+  const applyStockDeltaInForm = (sign: 1 | -1, explicitAmount?: number) => {
+    setStockInputError(null);
+    const currParsed = parseStockInput(stockStr || '0', unit);
+    const baseStock = currParsed.valid ? currParsed.value : 0;
+
+    let amount = explicitAmount;
+    if (amount === undefined) {
+      const deltaParsed = parseStockInput(stockDeltaStr, unit);
+      if (!deltaParsed.valid || deltaParsed.value <= 0) {
+        setStockInputError(
+          deltaParsed.error || 'Digite uma quantidade maior que zero para somar ou subtrair.',
+        );
+        return;
+      }
+      amount = deltaParsed.value;
+      setStockDeltaStr('');
+    }
+
+    const next = clampStockByUnit(Math.max(0, baseStock + sign * amount), unit);
+    setStockStr(formatStockInputText(next, unit));
+    triggerHaptic(20);
   };
 
   if (savedProduct) {
@@ -376,6 +443,9 @@ export function ProductFormScreen({
             </p>
             <p className="text-2xl font-black text-[#006e2d] tabular-nums mt-2">
               R$ {formatPriceInput(savedProduct.price)}
+            </p>
+            <p className="text-xs font-bold text-[#434655] mt-1 tabular-nums">
+              Estoque atual: {formatStockWithUnit(savedProduct.stock, savedProduct.unit)}
             </p>
           </div>
 
@@ -523,7 +593,7 @@ export function ProductFormScreen({
                 )}
                 {lookupStatus === 'not_found' && (
                   <span className="text-[#434655]">
-                    Produto não localizado na base pública (ou offline). Preencha manualmente abaixo sem perder o código.
+                    Código não encontrado na base pública — preencha o nome manualmente sem perder o código.
                   </span>
                 )}
               </div>
@@ -815,7 +885,7 @@ export function ProductFormScreen({
               />
             </div>
 
-            <div className="grid grid-cols-3 gap-2 sm:col-span-2">
+            <div className="grid grid-cols-2 gap-2 sm:col-span-2">
               <div className="flex flex-col gap-1">
                 <label
                   htmlFor="weightInput"
@@ -831,25 +901,8 @@ export function ProductFormScreen({
                     weightDirtyRef.current = e.target.value.trim().length > 0;
                     setWeightLabel(e.target.value);
                   }}
-                  placeholder="500g"
-                  className="bg-white h-11 px-3 rounded-xl border border-[#cbd5e1] text-sm font-semibold text-[#131b2e] outline-none"
-                />
-              </div>
-
-              <div className="flex flex-col gap-1">
-                <label
-                  htmlFor="stockInput"
-                  className="text-[11px] font-bold uppercase text-[#434655]"
-                >
-                  Estoque (un)
-                </label>
-                <input
-                  id="stockInput"
-                  type="number"
-                  min={0}
-                  value={stockStr}
-                  onChange={(e) => setStockStr(e.target.value)}
-                  className="bg-white h-11 px-3 rounded-xl border border-[#cbd5e1] text-sm font-semibold text-[#131b2e] tabular-nums outline-none"
+                  placeholder="Ex: 500g, 1L"
+                  className="bg-white h-11 px-3 rounded-xl border border-[#cbd5e1] text-sm font-semibold text-[#131b2e] outline-none focus:border-[#2563eb]"
                 />
               </div>
 
@@ -866,10 +919,168 @@ export function ProductFormScreen({
                   inputMode="decimal"
                   value={marginStr}
                   onChange={(e) => setMarginStr(e.target.value)}
-                  className="bg-white h-11 px-3 rounded-xl border border-[#cbd5e1] text-sm font-semibold text-[#131b2e] tabular-nums outline-none"
+                  className="bg-white h-11 px-3 rounded-xl border border-[#cbd5e1] text-sm font-semibold text-[#131b2e] tabular-nums outline-none focus:border-[#2563eb]"
                 />
               </div>
             </div>
+          </div>
+
+          {/* Field 5.5: Optimized Stock & Unit Control */}
+          <div className="bg-white rounded-2xl p-4 border border-[#e2e7ff] flex flex-col gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <span className="text-xs font-bold uppercase tracking-wider text-[#131b2e] block">
+                  Controle de Estoque &amp; Unidade
+                </span>
+                <span className="text-[11px] text-[#434655]">
+                  {STOCK_UNIT_META[unit].label} ·{' '}
+                  {STOCK_UNIT_META[unit].allowsDecimal
+                    ? 'aceita decimais (ex: 1,500)'
+                    : 'somente números inteiros'}
+                </span>
+              </div>
+              <span className="text-xs font-extrabold text-[#004ac6] bg-[#eaedff] px-2.5 py-1 rounded-lg tabular-nums">
+                {(() => {
+                  const parsed = parseStockInput(stockStr, unit);
+                  return parsed.valid
+                    ? formatStockWithUnit(parsed.value, unit)
+                    : `0 ${unit}`;
+                })()}
+              </span>
+            </div>
+
+            {/* Unit Selector */}
+            <div className="flex flex-col gap-1.5">
+              <label
+                htmlFor="unitSelect"
+                className="text-[11px] font-bold uppercase text-[#434655]"
+              >
+                Unidade de Medida
+              </label>
+              <div className="grid grid-cols-4 sm:grid-cols-8 gap-1.5">
+                {STOCK_UNITS.map((code) => {
+                  const selected = unit === code;
+                  return (
+                    <button
+                      key={code}
+                      type="button"
+                      onClick={() => handleSelectUnit(code)}
+                      className={`h-9 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
+                        selected
+                          ? 'bg-[#004ac6] text-white shadow-xs'
+                          : 'bg-[#f2f3ff] text-[#434655] hover:bg-[#eaedff]'
+                      }`}
+                    >
+                      {code}
+                    </button>
+                  );
+                })}
+              </div>
+              <select
+                id="unitSelect"
+                aria-label="Selecionar unidade de medida"
+                value={unit}
+                onChange={(e) => handleSelectUnit(normalizeStockUnit(e.target.value))}
+                className="sr-only"
+              >
+                {STOCK_UNITS.map((code) => (
+                  <option key={code} value={code}>
+                    {STOCK_UNIT_META[code].label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Direct Stock Input + Complementary -1 / +1 */}
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end">
+              <div className="sm:col-span-7 flex flex-col gap-1">
+                <label
+                  htmlFor="stockInput"
+                  className="text-[11px] font-bold uppercase text-[#434655]"
+                >
+                  Quantidade Total em Estoque ({unit})
+                </label>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    aria-label="Subtrair 1"
+                    onClick={() => applyStockDeltaInForm(-1, 1)}
+                    className="w-11 h-11 rounded-xl bg-[#f2f3ff] hover:bg-[#eaedff] border border-[#cbd5e1] flex items-center justify-center text-[#131b2e] shrink-0 cursor-pointer"
+                  >
+                    <Minus className="w-4 h-4" />
+                  </button>
+                  <div className="flex-1 flex items-center bg-[#f2f3ff] h-11 px-3 rounded-xl border border-[#cbd5e1] focus-within:border-[#2563eb] focus-within:bg-white">
+                    <input
+                      id="stockInput"
+                      type="text"
+                      inputMode={isDecimalStockUnit(unit) ? 'decimal' : 'numeric'}
+                      value={stockStr}
+                      onChange={(e) => {
+                        setStockInputError(null);
+                        setStockStr(e.target.value);
+                      }}
+                      placeholder={isDecimalStockUnit(unit) ? 'Ex: 1,500' : 'Ex: 24'}
+                      className="w-full bg-transparent text-base font-extrabold text-[#131b2e] tabular-nums outline-none"
+                    />
+                    <span className="text-xs font-bold text-[#434655] ml-1.5 select-none">
+                      {unit}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    aria-label="Somar 1"
+                    onClick={() => applyStockDeltaInForm(1, 1)}
+                    className="w-11 h-11 rounded-xl bg-[#f2f3ff] hover:bg-[#eaedff] border border-[#cbd5e1] flex items-center justify-center text-[#131b2e] shrink-0 cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Add / Subtract Batch Quantity */}
+              <div className="sm:col-span-5 flex flex-col gap-1">
+                <label
+                  htmlFor="stockDeltaInput"
+                  className="text-[11px] font-bold uppercase text-[#434655]"
+                >
+                  Somar / Subtrair ({unit})
+                </label>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    id="stockDeltaInput"
+                    type="text"
+                    inputMode={isDecimalStockUnit(unit) ? 'decimal' : 'numeric'}
+                    value={stockDeltaStr}
+                    onChange={(e) => {
+                      setStockInputError(null);
+                      setStockDeltaStr(e.target.value);
+                    }}
+                    placeholder={isDecimalStockUnit(unit) ? '1,5' : '15'}
+                    className="w-full min-w-0 h-11 px-2.5 rounded-xl bg-white border border-[#cbd5e1] focus:border-[#2563eb] text-sm font-bold text-[#131b2e] tabular-nums outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => applyStockDeltaInForm(1)}
+                    className="h-11 px-3 rounded-xl bg-[#dcfce7] hover:bg-[#bbf7d0] text-[#005320] text-xs font-extrabold shrink-0 cursor-pointer"
+                  >
+                    + Somar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyStockDeltaInForm(-1)}
+                    className="h-11 px-3 rounded-xl bg-[#ffdad6] hover:bg-[#fecaca] text-[#93000a] text-xs font-extrabold shrink-0 cursor-pointer"
+                  >
+                    - Tirar
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {stockInputError && (
+              <p role="alert" className="text-xs font-bold text-[#ba1a1a]">
+                {stockInputError}
+              </p>
+            )}
           </div>
 
           <div className="flex flex-col gap-1.5">

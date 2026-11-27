@@ -35,6 +35,7 @@ import {
   isValidPinFormat,
 } from '../utils/pinSecurity';
 import { sanitizeProductImageUrl } from '../utils/imageHelper';
+import { clampStockByUnit, normalizeStockUnit } from '../utils/stockUnit';
 
 function sanitizeId(raw: string): string {
   const cleaned = raw.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -209,6 +210,7 @@ export function subscribeStoreProducts(
           clubPrice: Number(data.clubPrice),
           marginPercent: Number(data.marginPercent),
           stock: Number(data.stock),
+          unit: normalizeStockUnit(data.unit),
           location: data.location,
           weightLabel: data.weightLabel,
           description: data.description || '',
@@ -248,6 +250,15 @@ export function subscribeStoreScanLogs(
           price: Number(data.price),
           action: data.action,
           operator: data.operator,
+          actorRole:
+            data.actorRole === 'manager' || data.actorRole === 'operator'
+              ? data.actorRole
+              : undefined,
+          unit: data.unit ? normalizeStockUnit(data.unit) : undefined,
+          previousStock:
+            typeof data.previousStock === 'number' ? Number(data.previousStock) : undefined,
+          newStock:
+            typeof data.newStock === 'number' ? Number(data.newStock) : undefined,
           timestamp: timestampToIso(data.timestamp),
         };
       });
@@ -313,6 +324,8 @@ export async function saveProductToFirestore(
   const path = `stores/${storeId}/products/${barcode}`;
   const ref = doc(db, 'stores', storeId, 'products', barcode);
 
+  const unit = normalizeStockUnit(product.unit);
+
   const sanitized = {
     name: clampStr(product.name, 120, 'Produto'),
     brand: clampStr(product.brand, 60, 'Marca Própria'),
@@ -321,9 +334,10 @@ export async function saveProductToFirestore(
     wholesalePrice: clampNum(product.wholesalePrice, 0, 1000000, product.price * 0.94),
     clubPrice: clampNum(product.clubPrice, 0, 1000000, product.price * 0.9),
     marginPercent: clampNum(product.marginPercent, 0, 100, 28),
-    stock: clampNum(product.stock, 0, 1000000, 0),
+    stock: clampStockByUnit(product.stock, unit),
+    unit,
     location: clampStr(product.location, 80, 'Balcão'),
-    weightLabel: clampStr(product.weightLabel, 24, 'un'),
+    weightLabel: clampStr(product.weightLabel, 24, unit.toLowerCase()),
     description: (product.description || '').trim().slice(0, 240),
     imageUrl: sanitizeProductImageUrl(product.imageUrl),
     operator: clampStr(product.operator, 32, 'Op. 01'),
@@ -359,6 +373,7 @@ export async function saveProductToFirestore(
     clubPrice: sanitized.clubPrice,
     marginPercent: sanitized.marginPercent,
     stock: sanitized.stock,
+    unit: sanitized.unit,
     location: sanitized.location,
     weightLabel: sanitized.weightLabel,
     description: sanitized.description,
@@ -374,12 +389,14 @@ export async function adjustStockInFirestore(
   nextStock: number,
   operatorCode: string,
   uid: string,
+  unit?: Product['unit'],
 ): Promise<void> {
   const cleanBarcode = sanitizeId(barcode);
   const path = `stores/${storeId}/products/${cleanBarcode}`;
+  const safeUnit = normalizeStockUnit(unit);
   try {
     await updateDoc(doc(db, 'stores', storeId, 'products', cleanBarcode), {
-      stock: clampNum(nextStock, 0, 1000000, 0),
+      stock: clampStockByUnit(nextStock, safeUnit),
       operator: clampStr(operatorCode, 32, 'Op. 01'),
       updatedBy: uid,
       updatedAt: serverTimestamp(),
@@ -410,19 +427,34 @@ export async function addScanLogToFirestore(
 ): Promise<void> {
   const logId = sanitizeId(`log_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`);
   const path = `stores/${storeId}/scans/${logId}`;
+  const safeUnit = entry.unit ? normalizeStockUnit(entry.unit) : undefined;
+  const payload: Record<string, unknown> = {
+    id: logId,
+    storeId,
+    ownerId,
+    barcode: sanitizeId(entry.barcode),
+    productName: clampStr(entry.productName, 120, 'Produto'),
+    price: clampNum(entry.price, 0, 1000000, 0),
+    action: entry.action,
+    operator: clampStr(entry.operator, 32, 'Op. 01'),
+    userId: uid,
+    timestamp: serverTimestamp(),
+  };
+  if (entry.actorRole === 'manager' || entry.actorRole === 'operator') {
+    payload.actorRole = entry.actorRole;
+  }
+  if (safeUnit) {
+    payload.unit = safeUnit;
+  }
+  if (typeof entry.previousStock === 'number' && Number.isFinite(entry.previousStock)) {
+    payload.previousStock = clampStockByUnit(entry.previousStock, safeUnit);
+  }
+  if (typeof entry.newStock === 'number' && Number.isFinite(entry.newStock)) {
+    payload.newStock = clampStockByUnit(entry.newStock, safeUnit);
+  }
+
   try {
-    await setDoc(doc(db, 'stores', storeId, 'scans', logId), {
-      id: logId,
-      storeId,
-      ownerId,
-      barcode: sanitizeId(entry.barcode),
-      productName: clampStr(entry.productName, 120, 'Produto'),
-      price: clampNum(entry.price, 0, 1000000, 0),
-      action: entry.action,
-      operator: clampStr(entry.operator, 32, 'Op. 01'),
-      userId: uid,
-      timestamp: serverTimestamp(),
-    });
+    await setDoc(doc(db, 'stores', storeId, 'scans', logId), payload);
   } catch (err) {
     handleFirestoreError(err, OperationType.CREATE, path);
   }
@@ -529,6 +561,7 @@ export async function syncLocalProductsToCloud(
     const ref = doc(db, 'stores', storeId, 'products', barcode);
     const snap = await getDoc(ref);
     if (!snap.exists()) {
+      const unit = normalizeStockUnit(item.unit);
       batch.set(ref, {
         barcode,
         storeId,
@@ -540,9 +573,10 @@ export async function syncLocalProductsToCloud(
         wholesalePrice: clampNum(item.wholesalePrice, 0, 1000000, item.price * 0.94),
         clubPrice: clampNum(item.clubPrice, 0, 1000000, item.price * 0.9),
         marginPercent: clampNum(item.marginPercent, 0, 100, 28),
-        stock: clampNum(item.stock, 0, 1000000, 0),
+        stock: clampStockByUnit(item.stock, unit),
+        unit,
         location: clampStr(item.location, 80, 'Balcão'),
-        weightLabel: clampStr(item.weightLabel, 24, 'un'),
+        weightLabel: clampStr(item.weightLabel, 24, unit.toLowerCase()),
         description: (item.description || '').trim().slice(0, 240),
         imageUrl: sanitizeProductImageUrl(item.imageUrl),
         operator: clampStr(item.operator, 32, 'Op. 01'),

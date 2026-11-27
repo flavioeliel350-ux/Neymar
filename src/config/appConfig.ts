@@ -79,8 +79,8 @@ export const BARCODE_CONFIG = {
   hidMaxKeyIntervalMs: 75,
   /** Tamanho mínimo de código aceito por leitor HID */
   hidMinLength: 6,
-  /** Timeout para consultas externas (Open Food Facts / Open Products Facts) */
-  lookupTimeoutMs: 4500,
+  /** Timeout curto por fonte para consultas externas (Open Food/Beauty/Products Facts) */
+  lookupTimeoutMs: 3200,
 } as const;
 
 export const appLogger = {

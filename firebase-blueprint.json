@@ -65,6 +65,7 @@
         "clubPrice": { "type": "number" },
         "marginPercent": { "type": "number" },
         "stock": { "type": "number" },
+        "unit": { "type": "string", "enum": ["UN", "CX", "PCT", "FD", "KG", "G", "L", "ML"] },
         "location": { "type": "string", "minLength": 1, "maxLength": 80 },
         "weightLabel": { "type": "string", "minLength": 1, "maxLength": 24 },
         "description": { "type": "string", "maxLength": 240 },
@@ -78,7 +79,7 @@
     },
     "ScanLog": {
       "title": "ScanLog",
-      "description": "Immutable barcode scan and price update audit entry.",
+      "description": "Immutable barcode scan, stock movement, and price update audit entry.",
       "type": "object",
       "properties": {
         "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
@@ -89,6 +90,10 @@
         "price": { "type": "number" },
         "action": { "type": "string", "enum": ["consulta", "cadastro", "ajuste"] },
         "operator": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "actorRole": { "type": "string", "enum": ["manager", "operator"] },
+        "unit": { "type": "string", "enum": ["UN", "CX", "PCT", "FD", "KG", "G", "L", "ML"] },
+        "previousStock": { "type": "number" },
+        "newStock": { "type": "number" },
         "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "timestamp": { "type": "string", "format": "date-time" }
       },

@@ -97,7 +97,7 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'barcode', 'storeId', 'ownerId', 'name', 'brand', 'category',
-          'price', 'wholesalePrice', 'clubPrice', 'marginPercent', 'stock',
+          'price', 'wholesalePrice', 'clubPrice', 'marginPercent', 'stock', 'unit',
           'location', 'weightLabel', 'description', 'imageUrl', 'operator',
           'updatedBy', 'createdAt', 'updatedAt'
         ])
@@ -112,6 +112,7 @@ service cloud.firestore {
         && data.clubPrice is number && data.clubPrice >= 0 && data.clubPrice <= 1000000
         && data.marginPercent is number && data.marginPercent >= 0 && data.marginPercent <= 100
         && data.stock is number && data.stock >= 0 && data.stock <= 1000000
+        && (!('unit' in data) || (data.unit is string && data.unit in ['UN', 'CX', 'PCT', 'FD', 'KG', 'G', 'L', 'ML']))
         && data.location is string && data.location.size() >= 1 && data.location.size() <= 80
         && data.weightLabel is string && data.weightLabel.size() >= 1 && data.weightLabel.size() <= 24
         && data.description is string && data.description.size() <= 240
@@ -133,7 +134,8 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'id', 'storeId', 'ownerId', 'barcode', 'productName',
-          'price', 'action', 'operator', 'userId', 'timestamp'
+          'price', 'action', 'operator', 'actorRole', 'unit',
+          'previousStock', 'newStock', 'userId', 'timestamp'
         ])
         && data.id is string && isValidId(data.id)
         && data.storeId is string && isValidId(data.storeId)
@@ -143,6 +145,10 @@ service cloud.firestore {
         && data.price is number && data.price >= 0 && data.price <= 1000000
         && data.action in ['consulta', 'cadastro', 'ajuste']
         && data.operator is string && data.operator.size() >= 1 && data.operator.size() <= 32
+        && (!('actorRole' in data) || (data.actorRole is string && data.actorRole in ['manager', 'operator']))
+        && (!('unit' in data) || (data.unit is string && data.unit in ['UN', 'CX', 'PCT', 'FD', 'KG', 'G', 'L', 'ML']))
+        && (!('previousStock' in data) || (data.previousStock is number && data.previousStock >= 0 && data.previousStock <= 1000000))
+        && (!('newStock' in data) || (data.newStock is number && data.newStock >= 0 && data.newStock <= 1000000))
         && data.userId is string && data.userId == request.auth.uid
         && data.timestamp is timestamp;
     }
@@ -256,7 +262,7 @@ service cloud.firestore {
             incoming().diff(existing()).affectedKeys().hasOnly(['stock', 'operator', 'updatedBy', 'updatedAt'])
             || incoming().diff(existing()).affectedKeys().hasOnly([
               'name', 'brand', 'category', 'price', 'wholesalePrice',
-              'clubPrice', 'marginPercent', 'stock', 'location',
+              'clubPrice', 'marginPercent', 'stock', 'unit', 'location',
               'weightLabel', 'description', 'imageUrl', 'operator', 'updatedBy', 'updatedAt'
             ])
           );
